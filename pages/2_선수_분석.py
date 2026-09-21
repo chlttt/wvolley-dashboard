@@ -1004,6 +1004,8 @@ if (
         fig_compare.update_layout(
             height=560,
             margin=dict(l=60, r=40, t=40, b=80),
+            uniformtext_minsize=BAR_LABEL_SIZE,
+            uniformtext_mode="show",
             font=dict(
                 size=BODY_TEXT_SIZE,
                 color="black",
