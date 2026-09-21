@@ -2,6 +2,21 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+# ==========================================
+# 글씨 크기 설정
+# 숫자만 바꾸면 해당 글씨 크기가 변경됩니다.
+# ==========================================
+PAGE_TITLE_SIZE = 52
+SECTION_TITLE_SIZE = 40
+SUBSECTION_TITLE_SIZE = 32
+BODY_TEXT_SIZE = 20
+METRIC_VALUE_SIZE = 46
+METRIC_LABEL_SIZE = 22
+TEAM_NAME_SIZE = 18
+BAR_LABEL_SIZE = 20
+AXIS_TITLE_SIZE = 22
+AXIS_TICK_SIZE = 20
+
 st.set_page_config(
     page_title="팀 분석 | 여자배구 데이터 대시보드",
     page_icon="🏐",
@@ -9,15 +24,15 @@ st.set_page_config(
 )
 
 st.markdown(
-    """
+    f"""
     <style>
-    html, body, [class*="css"] { font-size: 20px; }
-    .stMarkdown, .stCaption, .stMetric, label, p, div { font-size: 20px; }
-    h1 { font-size: 52px !important; }
-    h2 { font-size: 40px !important; }
-    h3 { font-size: 32px !important; }
-    [data-testid="stMetricValue"] { font-size: 46px !important; }
-    [data-testid="stMetricLabel"] { font-size: 22px !important; }
+    html, body, [class*="css"] {{ font-size: {BODY_TEXT_SIZE}px; }}
+    .stMarkdown, .stCaption, .stMetric, label, p, div {{ font-size: {BODY_TEXT_SIZE}px; }}
+    h1 {{ font-size: {PAGE_TITLE_SIZE}px !important; }}
+    h2 {{ font-size: {SECTION_TITLE_SIZE}px !important; }}
+    h3 {{ font-size: {SUBSECTION_TITLE_SIZE}px !important; }}
+    [data-testid="stMetricValue"] {{ font-size: {METRIC_VALUE_SIZE}px !important; }}
+    [data-testid="stMetricLabel"] {{ font-size: {METRIC_LABEL_SIZE}px !important; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -127,22 +142,22 @@ fig_set.update_traces(
     ],
     textposition="outside",
     cliponaxis=False,
-    textfont=dict(size=20),
+    textfont=dict(size=BAR_LABEL_SIZE),
 )
 
 fig_set.update_layout(
     height=520,
     margin=dict(l=20, r=20, t=70, b=20),
-    font=dict(size=20),
+    font=dict(size=BODY_TEXT_SIZE),
     xaxis=dict(
         tickmode="linear",
         dtick=1,
-        tickfont=dict(size=20),
-        title_font=dict(size=22),
+        tickfont=dict(size=BODY_TEXT_SIZE),
+        title_font=dict(size=AXIS_TITLE_SIZE),
     ),
     yaxis=dict(
-        tickfont=dict(size=20),
-        title_font=dict(size=22),
+        tickfont=dict(size=BODY_TEXT_SIZE),
+        title_font=dict(size=AXIS_TITLE_SIZE),
     ),
 )
 
@@ -208,17 +223,17 @@ fig_score.update_traces(
     ],
     textposition="outside",
     cliponaxis=False,
-    textfont=dict(size=20),
+    textfont=dict(size=BAR_LABEL_SIZE),
 )
 
 fig_score.update_layout(
     height=500,
     margin=dict(l=20, r=20, t=70, b=20),
-    font=dict(size=20),
-    xaxis=dict(tickfont=dict(size=20)),
+    font=dict(size=BODY_TEXT_SIZE),
+    xaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE)),
     yaxis=dict(
-        tickfont=dict(size=20),
-        title_font=dict(size=22),
+        tickfont=dict(size=BODY_TEXT_SIZE),
+        title_font=dict(size=AXIS_TITLE_SIZE),
     ),
 )
 
@@ -305,17 +320,17 @@ fig_player.update_traces(
     ],
     textposition="outside",
     cliponaxis=False,
-    textfont=dict(size=18),
+    textfont=dict(size=TEAM_NAME_SIZE),
 )
 
 fig_player.update_layout(
     height=540,
     margin=dict(l=20, r=20, t=70, b=80),
-    font=dict(size=20),
-    xaxis=dict(tickfont=dict(size=18)),
+    font=dict(size=BODY_TEXT_SIZE),
+    xaxis=dict(tickfont=dict(size=TEAM_NAME_SIZE)),
     yaxis=dict(
-        tickfont=dict(size=20),
-        title_font=dict(size=22),
+        tickfont=dict(size=BODY_TEXT_SIZE),
+        title_font=dict(size=AXIS_TITLE_SIZE),
     ),
 )
 
