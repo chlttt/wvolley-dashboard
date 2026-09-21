@@ -64,6 +64,7 @@ def load_data():
     routes = pd.read_parquet("season_routes_2526.parquet")
     games = pd.read_parquet("games_2526_all.parquet")
     receives = pd.read_parquet("receive_events_2526.parquet")
+    set_summary = pd.read_parquet("set_summary_2526.parquet")
 
     for col in ["공격성공", "공격범실", "블로킹당함"]:
         if col in routes.columns:
@@ -79,10 +80,10 @@ def load_data():
         if col in routes.columns:
             routes[col] = routes[col].fillna(False).astype(bool)
 
-    return routes, games, receives
+    return routes, games, receives, set_summary
 
 
-routes, games, receives = load_data()
+routes, games, receives, set_summary = load_data()
 
 
 def apply_attack_scope(df, scope, game_key=None):
@@ -222,36 +223,127 @@ def receive_summary(df):
     }
 
 
+def enrich_receive_set_tags(receive_df, set_df):
+    """
+    리시브 이벤트에 세트 단위 태그를 붙입니다.
+    접전세트/듀스세트/경기결정세트는 같은 경기·세트의 모든 이벤트에 공통입니다.
+    """
+    out = receive_df.copy()
+
+    tag_cols = [
+        col
+        for col in [
+            "접전세트",
+            "듀스세트",
+            "경기결정세트",
+        ]
+        if col in set_df.columns
+    ]
+
+    if not tag_cols:
+        return out
+
+    join_keys = [
+        col
+        for col in [
+            "시즌코드",
+            "경기번호",
+            "세트",
+        ]
+        if col in out.columns and col in set_df.columns
+    ]
+
+    if len(join_keys) < 2:
+        return out
+
+    tag_table = (
+        set_df[join_keys + tag_cols]
+        .drop_duplicates(subset=join_keys)
+        .copy()
+    )
+
+    out = out.merge(
+        tag_table,
+        on=join_keys,
+        how="left",
+    )
+
+    for col in tag_cols:
+        out[col] = out[col].fillna(False).astype(bool)
+
+    return out
+
+
 def receive_comparison_rows(df):
     """
-    현재 저장된 receive_events 데이터로 계산 가능한 리시브 비교 행.
-    점수 기반 접전(3점차/후반 3점차/후반 5점차)은
-    receive_events에 당시 점수 필드가 추가되면 자동 확장할 예정입니다.
+    리시브 상황별 비교.
+    현재 데이터로 가능한 전체/접전세트/듀스세트/경기결정세트를 계산합니다.
+    점수 기반 3점차/후반 3점차/후반 5점차는 리시브 이벤트에
+    당시 점수 필드를 추가한 뒤 같은 위치에 확장합니다.
     """
     rows = []
 
-    whole = receive_summary(df)
-    rows.append(
-        {
-            "상황": "전체",
-            "리시브시도": whole["리시브시도"],
-            "리시브정확": whole["리시브정확"],
-            "리시브실패": whole["리시브실패"],
-            "정확리시브율_%": (
-                whole["리시브정확"] / whole["리시브시도"] * 100
-                if whole["리시브시도"]
-                else 0
-            ),
-            "실패율_%": (
-                whole["리시브실패"] / whole["리시브시도"] * 100
-                if whole["리시브시도"]
-                else 0
-            ),
-            "리시브효율_%": whole["리시브효율_%"],
-        }
-    )
+    def append_row(label, subset):
+        s = receive_summary(subset)
+        rows.append(
+            {
+                "상황": label,
+                "리시브시도": s["리시브시도"],
+                "리시브정확": s["리시브정확"],
+                "리시브실패": s["리시브실패"],
+                "정확리시브율_%": (
+                    s["리시브정확"] / s["리시브시도"] * 100
+                    if s["리시브시도"]
+                    else 0
+                ),
+                "실패율_%": (
+                    s["리시브실패"] / s["리시브시도"] * 100
+                    if s["리시브시도"]
+                    else 0
+                ),
+                "리시브효율_%": s["리시브효율_%"],
+            }
+        )
 
-    return pd.DataFrame(rows)
+    append_row("전체", df)
+
+    for col, label in [
+        ("접전세트", "접전 세트"),
+        ("듀스세트", "듀스 세트"),
+        ("경기결정세트", "경기 결정 세트"),
+    ]:
+        if col in df.columns:
+            append_row(
+                label,
+                df[df[col] == True],
+            )
+
+    order = [
+        "전체",
+        "3점차 이내",
+        "후반 5점차 이내",
+        "후반 3점차 이내",
+        "접전 세트",
+        "듀스 세트",
+        "경기 결정 세트",
+    ]
+
+    result = pd.DataFrame(rows)
+
+    if not result.empty:
+        result["상황"] = pd.Categorical(
+            result["상황"],
+            categories=order,
+            ordered=True,
+        )
+        result = (
+            result
+            .sort_values("상황")
+            .reset_index(drop=True)
+        )
+        result["상황"] = result["상황"].astype(str)
+
+    return result
 
 
 def build_player_summary(player_rows, team_rows):
@@ -805,8 +897,13 @@ player_summary = build_player_summary(
 )
 
 # 리시브 데이터에도 같은 시즌 / 팀 / 범위를 적용
-receive_scope = receives[
-    receives["시즌코드"].astype(str)
+receive_scope = enrich_receive_set_tags(
+    receives,
+    set_summary,
+)
+
+receive_scope = receive_scope[
+    receive_scope["시즌코드"].astype(str)
     == str(selected_season_code)
 ].copy()
 
@@ -1297,8 +1394,13 @@ if (
         # ------------------------------
         # 리시브 비교
         # ------------------------------
-        receive_compare_base = receives[
-            receives["시즌코드"].astype(str)
+        receive_compare_base = enrich_receive_set_tags(
+            receives,
+            set_summary,
+        )
+
+        receive_compare_base = receive_compare_base[
+            receive_compare_base["시즌코드"].astype(str)
             == str(selected_season_code)
         ].copy()
 
@@ -1612,11 +1714,9 @@ if (
                 )
 
             st.caption(
-                "현재 저장된 리시브 이벤트에는 당시 점수 정보가 없어 "
-                "리시브 비교는 우선 전체 기준으로 제공합니다. "
-                "다음 데이터 갱신 때 3점차 이내·후반 5점차 이내·"
-                "후반 3점차 이내·접전/듀스/경기결정 세트까지 "
-                "공격 비교와 같은 구조로 확장합니다."
+                "접전 세트·듀스 세트·경기 결정 세트는 세트 결과 기준으로 계산합니다. "
+                "3점차 이내·후반 5점차 이내·후반 3점차 이내는 "
+                "리시브가 발생한 랠리 시작 시점의 점수 데이터가 추가되면 확장합니다."
             )
 
 
