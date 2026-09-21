@@ -902,7 +902,7 @@ if selected_player != "전체 선수":
                 close_df,
                 use_container_width=True,
                 hide_index=True,
-                height=38 + 35 * len(close_df) + 6,
+                height=58 + 54 * len(close_df) + 8,
             )
 
             st.caption(
@@ -965,7 +965,7 @@ if selected_player != "전체 선수":
                 situation_df,
                 use_container_width=True,
                 hide_index=True,
-                height=38 + 35 * len(situation_df) + 6,
+                height=58 + 54 * len(situation_df) + 8,
             )
 
 
