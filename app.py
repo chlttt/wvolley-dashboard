@@ -134,14 +134,29 @@ fig_team = px.bar(
     },
 )
 
+fig_team.update_traces(
+    text=[
+        f"{rate:.1f}%<br>({attempts:,}회)"
+        for rate, attempts in zip(
+            team_summary["공격성공률_%"],
+            team_summary["공격시도"]
+        )
+    ],
+    textposition="outside",
+    cliponaxis=False,
+)
+
 fig_team.update_layout(
-    height=430,
-    margin=dict(l=10, r=10, t=20, b=10),
+    height=460,
+    margin=dict(l=10, r=10, t=55, b=10),
     hovermode="x unified",
 )
 
 fig_team.update_yaxes(
-    rangemode="tozero",
+    range=[
+        0,
+        max(team_summary["공격성공률_%"]) + 12
+    ],
     ticksuffix="%",
 )
 
@@ -197,13 +212,28 @@ fig_set = px.bar(
     },
 )
 
+fig_set.update_traces(
+    text=[
+        f"{rate:.1f}%<br>({attempts:,}회)"
+        for rate, attempts in zip(
+            set_summary["공격성공률_%"],
+            set_summary["공격시도"]
+        )
+    ],
+    textposition="outside",
+    cliponaxis=False,
+)
+
 fig_set.update_layout(
-    height=400,
-    margin=dict(l=10, r=10, t=20, b=10),
+    height=430,
+    margin=dict(l=10, r=10, t=55, b=10),
 )
 
 fig_set.update_yaxes(
-    rangemode="tozero",
+    range=[
+        0,
+        max(set_summary["공격성공률_%"]) + 12
+    ],
     ticksuffix="%",
 )
 
