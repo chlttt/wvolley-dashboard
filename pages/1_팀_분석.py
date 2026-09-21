@@ -57,9 +57,21 @@ st.caption("2025-26 V-League 여자부 팀별 공격 지표")
 with st.sidebar:
     st.header("팀 분석 필터")
 
-    competition_options = ["전체"] + sorted(
+    competition_order = [
+        "정규리그",
+        "준플레이오프",
+        "플레이오프",
+        "챔피언결정전",
+    ]
+
+    available_competitions = (
         routes["대회구분"].dropna().astype(str).unique().tolist()
     )
+
+    competition_options = ["전체"] + [
+        comp for comp in competition_order
+        if comp in available_competitions
+    ]
     selected_competition = st.selectbox("대회 구분", competition_options)
 
     base = routes.copy()
