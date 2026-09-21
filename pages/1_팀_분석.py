@@ -2,6 +2,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from team_config import get_team_color
+
 # ==========================================
 # 글씨 크기 설정
 # 숫자만 바꾸면 해당 글씨 크기가 변경됩니다.
@@ -19,19 +21,6 @@ AXIS_TICK_SIZE = 20
 X_AXIS_TEXT_COLOR = "black"
 CHART_TEXT_COLOR = "black"
 
-# ==========================================
-# 팀 대표 색상
-# 사이트 시각화용으로 일관되게 사용
-# ==========================================
-TEAM_COLORS = {
-    "GS칼텍스": "#00718F",
-    "IBK기업은행": "#0055A4",
-    "정관장": "#C8102E",
-    "페퍼저축은행": "#E61E4D",
-    "한국도로공사": "#005BAC",
-    "현대건설": "#F4B400",
-    "흥국생명": "#D6006D",
-}
 
 
 st.set_page_config(
@@ -178,7 +167,13 @@ with st.sidebar:
             team_df["대회구분"].astype(str) == selected_scope
         ]
 
-selected_team_color = TEAM_COLORS.get(selected_team, "#4C6EF5")
+selected_season_code = team_df["시즌코드"].astype(str).iloc[0]
+selected_team_code = team_df["팀코드"].astype(str).iloc[0]
+
+selected_team_color = get_team_color(
+    selected_season_code,
+    selected_team_code
+)
 
 st.subheader(selected_team)
 
