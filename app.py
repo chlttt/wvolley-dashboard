@@ -176,7 +176,10 @@ fig_team.update_layout(
     margin=dict(l=20, r=20, t=70, b=20),
     hovermode="x unified",
     font=dict(size=20),
-    xaxis=dict(tickfont=dict(size=20), title_font=dict(size=22)),
+    xaxis=dict(
+        tickfont=dict(size=16, color="black"),
+        title_font=dict(size=22, color="black"),
+    ),
     yaxis=dict(tickfont=dict(size=20), title_font=dict(size=22)),
 )
 
