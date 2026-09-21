@@ -56,9 +56,12 @@ def add_smart_scatter_labels(
     point_size=14,
 ):
     """
-    산점도 라벨을 점 가까이에 배치하되,
-    이미 배치한 라벨/점과의 겹침을 피하도록 후보 위치를 자동 선택합니다.
-    라벨과 점은 연결선으로 이어집니다.
+    산점도 라벨 자동 배치 규칙
+    - 라벨끼리 겹치지 않음
+    - 라벨이 다른 점을 덮지 않음
+    - 연결선이 다른 라벨을 가로지르지 않음
+    - 가능한 한 짧고 단순한 연결선을 사용
+    - 첫 화면에서 모든 점과 라벨이 보이도록 여백 확보
     """
 
     if data.empty:
@@ -72,49 +75,126 @@ def add_smart_scatter_labels(
     x_span = max(x_max - x_min, 1.0)
     y_span = max(y_max - y_min, 1.0)
 
-    # 화면상 대략적인 플롯 영역(px)
-    plot_w = 1050
-    plot_h = 500
+    # 실제 차트 비율에 가까운 가상 픽셀 좌표계
+    plot_w = 1100
+    plot_h = 520
 
     def to_px(x, y):
         px = (float(x) - x_min) / x_span * plot_w
         py = (y_max - float(y)) / y_span * plot_h
         return px, py
 
-    # 짧고 자연스러운 연결선을 우선하고,
-    # 필요할 때만 대각선/조금 먼 위치를 사용
+    def boxes_overlap(a, b, gap=8):
+        return not (
+            a[2] + gap < b[0]
+            or a[0] - gap > b[2]
+            or a[3] + gap < b[1]
+            or a[1] - gap > b[3]
+        )
+
+    def point_in_box(px, py, box, pad=10):
+        return (
+            box[0] - pad <= px <= box[2] + pad
+            and box[1] - pad <= py <= box[3] + pad
+        )
+
+    def segment_hits_box(x1, y1, x2, y2, box, samples=24):
+        # 선을 여러 점으로 나눠 다른 라벨 박스를 통과하는지 확인
+        for j in range(1, samples):
+            t = j / samples
+            sx = x1 + (x2 - x1) * t
+            sy = y1 + (y2 - y1) * t
+            if point_in_box(sx, sy, box, pad=4):
+                return True
+        return False
+
+    def segments_too_close(seg1, seg2, threshold=10):
+        # 두 연결선이 서로 지나치게 가까워지는지 근사 검사
+        (x1, y1, x2, y2) = seg1
+        (a1, b1, a2, b2) = seg2
+
+        pts1 = [
+            (
+                x1 + (x2 - x1) * t / 12,
+                y1 + (y2 - y1) * t / 12,
+            )
+            for t in range(1, 12)
+        ]
+        pts2 = [
+            (
+                a1 + (a2 - a1) * t / 12,
+                b1 + (b2 - b1) * t / 12,
+            )
+            for t in range(1, 12)
+        ]
+
+        for px1, py1 in pts1:
+            for px2, py2 in pts2:
+                if (
+                    (px1 - px2) ** 2 + (py1 - py2) ** 2
+                ) ** 0.5 < threshold:
+                    return True
+
+        return False
+
+    # 가까운 위치부터 탐색. 단순 수직/수평을 먼저 사용.
     candidates = [
-        (0, 34),
-        (0, -34),
-        (42, 0),
-        (-42, 0),
-        (38, 28),
-        (-38, 28),
-        (38, -28),
-        (-38, -28),
-        (0, 52),
-        (0, -52),
+        (0, 46),
+        (0, -46),
         (58, 0),
         (-58, 0),
-        (52, 36),
-        (-52, 36),
-        (52, -36),
-        (-52, -36),
+        (52, 38),
+        (-52, 38),
+        (52, -38),
+        (-52, -38),
+        (0, 68),
+        (0, -68),
+        (78, 0),
+        (-78, 0),
+        (70, 48),
+        (-70, 48),
+        (70, -48),
+        (-70, -48),
+        (0, 92),
+        (0, -92),
+        (98, 0),
+        (-98, 0),
     ]
 
     placed_boxes = []
+    placed_segments = []
+
     point_positions = [
         to_px(row[x_col], row[y_col])
         for _, row in data.iterrows()
     ]
 
-    for _, row in data.iterrows():
+    # 밀집된 점부터 먼저 배치하면 충돌 회피가 더 안정적
+    work = data.copy().reset_index(drop=True)
+
+    density = []
+    for i, row in work.iterrows():
+        px, py = to_px(row[x_col], row[y_col])
+        nearest = []
+        for j, other in work.iterrows():
+            if i == j:
+                continue
+            ox, oy = to_px(other[x_col], other[y_col])
+            nearest.append(((px - ox) ** 2 + (py - oy) ** 2) ** 0.5)
+        density.append(min(nearest) if nearest else 9999)
+
+    work["_nearest_distance"] = density
+    work = work.sort_values("_nearest_distance").drop(
+        columns="_nearest_distance"
+    )
+
+    for _, row in work.iterrows():
         label = str(row[label_col])
         point_x, point_y = to_px(row[x_col], row[y_col])
 
-        # 한글 글자 수를 고려한 대략적 라벨 박스 크기
-        label_w = max(46, len(label) * font_size * 1.05)
-        label_h = font_size * 1.65
+        # 한글 라벨 폭을 넉넉하게 계산
+        label_w = max(62, len(label) * font_size * 1.28)
+        label_h = font_size * 2.05
 
         best = None
         best_score = float("inf")
@@ -130,49 +210,78 @@ def add_smart_scatter_labels(
                 label_cy + label_h / 2,
             )
 
-            score = (ax ** 2 + ay ** 2) ** 0.5 * 0.10
+            segment = (
+                point_x,
+                point_y,
+                label_cx,
+                label_cy,
+            )
 
-            # 플롯 바깥으로 나가려는 라벨에 큰 페널티
-            if box[0] < 0:
-                score += abs(box[0]) * 8
-            if box[2] > plot_w:
-                score += (box[2] - plot_w) * 8
-            if box[1] < 0:
-                score += abs(box[1]) * 8
-            if box[3] > plot_h:
-                score += (box[3] - plot_h) * 8
+            # 기본적으로 짧은 선을 선호
+            score = ((ax ** 2 + ay ** 2) ** 0.5) * 0.08
 
-            # 기존 라벨 박스와 겹침 검사
-            for prev in placed_boxes:
-                overlap_x = max(
-                    0,
-                    min(box[2], prev[2]) - max(box[0], prev[0])
-                )
-                overlap_y = max(
-                    0,
-                    min(box[3], prev[3]) - max(box[1], prev[1])
-                )
+            # 차트 밖으로 나가는 후보는 사실상 제외
+            if box[0] < 8:
+                score += 20000 + abs(box[0]) * 30
+            if box[2] > plot_w - 8:
+                score += 20000 + (box[2] - plot_w) * 30
+            if box[1] < 8:
+                score += 20000 + abs(box[1]) * 30
+            if box[3] > plot_h - 8:
+                score += 20000 + (box[3] - plot_h) * 30
 
-                if overlap_x > 0 and overlap_y > 0:
-                    score += 5000 + overlap_x * overlap_y * 3
+            # 기존 라벨과 겹치면 강하게 제외
+            for prev_box in placed_boxes:
+                if boxes_overlap(box, prev_box, gap=10):
+                    score += 50000
 
-            # 다른 점을 라벨이 덮지 않도록 검사
+                # 새 연결선이 기존 라벨을 관통하지 않게 함
+                if segment_hits_box(
+                    point_x,
+                    point_y,
+                    label_cx,
+                    label_cy,
+                    prev_box,
+                ):
+                    score += 30000
+
+            # 새 라벨이 다른 점을 덮지 않게 함
             for other_x, other_y in point_positions:
-                if abs(other_x - point_x) < 1 and abs(other_y - point_y) < 1:
+                if (
+                    abs(other_x - point_x) < 1
+                    and abs(other_y - point_y) < 1
+                ):
                     continue
 
-                if (
-                    box[0] - point_size <= other_x <= box[2] + point_size
-                    and box[1] - point_size <= other_y <= box[3] + point_size
+                if point_in_box(
+                    other_x,
+                    other_y,
+                    box,
+                    pad=point_size + 5,
                 ):
-                    score += 2500
+                    score += 30000
+
+            # 연결선끼리도 최대한 겹치거나 교차하지 않게 함
+            for prev_segment in placed_segments:
+                if segments_too_close(
+                    segment,
+                    prev_segment,
+                    threshold=8,
+                ):
+                    score += 12000
 
             if score < best_score:
                 best_score = score
-                best = (ax, ay, box)
+                best = (
+                    ax,
+                    ay,
+                    box,
+                    segment,
+                )
 
-        ax, ay, box = best
+        ax, ay, box, segment = best
         placed_boxes.append(box)
+        placed_segments.append(segment)
 
         fig.add_annotation(
             x=row[x_col],
@@ -189,19 +298,20 @@ def add_smart_scatter_labels(
                 size=font_size,
                 color="black",
             ),
-            bgcolor="rgba(255,255,255,0.90)",
-            borderpad=2,
+            # 완전 불투명 흰색: 그리드/선이 글자를 통과해 보이지 않게 함
+            bgcolor="white",
+            bordercolor="rgba(0,0,0,0)",
+            borderpad=3,
         )
 
-    # 라벨 여유 공간까지 포함해 첫 화면에서 전부 보이도록 축 범위 확대
-    x_padding = max(x_span * 0.14, 1.5)
-    y_padding = max(y_span * 0.18, 1.5)
+    # 첫 화면에서 점과 라벨이 모두 보이도록 넉넉한 범위
+    x_padding = max(x_span * 0.18, 2.0)
+    y_padding = max(y_span * 0.22, 2.0)
 
     return (
         [x_min - x_padding, x_max + x_padding],
         [y_min - y_padding, y_max + y_padding],
     )
-
 
 @st.cache_data
 def load_data():
@@ -739,12 +849,14 @@ if analysis_level == "선수":
         xaxis=dict(
             range=player_x_range,
             automargin=True,
+            showgrid=False,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
         yaxis=dict(
             range=player_y_range,
             automargin=True,
+            showgrid=False,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
@@ -990,12 +1102,14 @@ else:
         xaxis=dict(
             range=team_x_range,
             automargin=True,
+            showgrid=False,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
         yaxis=dict(
             range=team_y_range,
             automargin=True,
+            showgrid=False,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
