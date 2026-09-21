@@ -382,61 +382,69 @@ with st.sidebar:
         horizontal=True,
     )
 
-    # 3) 팀
-    team_options = ["전체 팀"] + sorted(
-        season_base["팀"].dropna().astype(str).unique().tolist()
-    )
-
-    selected_team = st.selectbox(
-        "팀",
-        team_options,
-        index=0,
-    )
-
-    team_base = season_base.copy()
-
-    if selected_team != "전체 팀":
-        team_base = team_base[
-            team_base["팀"].astype(str) == selected_team
-        ]
-
-    # 4) 포지션
-    position_options = ["전체 포지션"] + sorted(
-        team_base["공격수포지션"]
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
-    )
-
-    selected_position = st.selectbox(
-        "포지션",
-        position_options,
-        index=0,
-    )
-
-    position_base = team_base.copy()
-
-    if selected_position != "전체 포지션":
-        position_base = position_base[
-            position_base["공격수포지션"].astype(str)
-            == selected_position
-        ]
-
-    # 5) 선수
-    available_players = sorted(
-        position_base["공격수"]
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
-    )
-
+    selected_team = "전체 팀"
+    selected_position = "전체 포지션"
     selected_player = "전체 선수"
     selected_player_a = None
     selected_player_b = None
 
+    team_options = sorted(
+        season_base["팀"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
     if analysis_mode == "개별 선수":
+        # 3) 팀
+        individual_team_options = ["전체 팀"] + team_options
+
+        selected_team = st.selectbox(
+            "팀",
+            individual_team_options,
+            index=0,
+        )
+
+        team_base = season_base.copy()
+
+        if selected_team != "전체 팀":
+            team_base = team_base[
+                team_base["팀"].astype(str) == selected_team
+            ]
+
+        # 4) 포지션
+        position_options = ["전체 포지션"] + sorted(
+            team_base["공격수포지션"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        selected_position = st.selectbox(
+            "포지션",
+            position_options,
+            index=0,
+        )
+
+        position_base = team_base.copy()
+
+        if selected_position != "전체 포지션":
+            position_base = position_base[
+                position_base["공격수포지션"].astype(str)
+                == selected_position
+            ]
+
+        # 5) 선수
+        available_players = sorted(
+            position_base["공격수"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
         player_options = ["전체 선수"] + available_players
 
         selected_player = st.selectbox(
@@ -447,46 +455,96 @@ with st.sidebar:
 
         scope_source = position_base.copy()
 
-        if (
-    analysis_mode == "개별 선수"
-    and selected_player != "전체 선수"
-):
+        if selected_player != "전체 선수":
             scope_source = scope_source[
                 scope_source["공격수"].astype(str)
                 == selected_player
             ]
 
     else:
-        if len(available_players) >= 2:
-            selected_player_a = st.selectbox(
-                "선수 A",
-                available_players,
-                index=0,
-            )
+        # 비교 모드에서는 팀 A / 팀 B를 독립적으로 선택
+        # 서로 다른 팀 선수도 비교할 수 있음
+        team_base = season_base.copy()
+        position_base = season_base.copy()
 
+        selected_team_a = st.selectbox(
+            "팀 A",
+            team_options,
+            index=0,
+            key="compare_team_a",
+        )
+
+        player_a_pool = season_base[
+            season_base["팀"].astype(str) == selected_team_a
+        ].copy()
+
+        player_a_options = sorted(
+            player_a_pool["공격수"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        selected_player_a = st.selectbox(
+            "선수 A",
+            player_a_options,
+            index=0,
+            key="compare_player_a",
+        )
+
+        selected_team_b = st.selectbox(
+            "팀 B",
+            team_options,
+            index=(1 if len(team_options) > 1 else 0),
+            key="compare_team_b",
+        )
+
+        player_b_pool = season_base[
+            season_base["팀"].astype(str) == selected_team_b
+        ].copy()
+
+        player_b_options = sorted(
+            player_b_pool["공격수"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        if (
+            selected_team_a == selected_team_b
+            and selected_player_a in player_b_options
+            and len(player_b_options) > 1
+        ):
             player_b_options = [
-                p for p in available_players
+                p for p in player_b_options
                 if p != selected_player_a
             ]
 
-            selected_player_b = st.selectbox(
-                "선수 B",
-                player_b_options,
-                index=0,
-            )
+        selected_player_b = st.selectbox(
+            "선수 B",
+            player_b_options,
+            index=0,
+            key="compare_player_b",
+        )
 
-            scope_source = position_base[
-                position_base["공격수"].astype(str).isin(
-                    [
-                        selected_player_a,
-                        selected_player_b,
-                    ]
+        scope_source = season_base[
+            (
+                (season_base["팀"].astype(str) == selected_team_a)
+                & (
+                    season_base["공격수"].astype(str)
+                    == selected_player_a
                 )
-            ].copy()
-
-        else:
-            st.warning("현재 조건에서는 비교할 선수가 2명 이상 필요합니다.")
-            scope_source = position_base.iloc[0:0].copy()
+            )
+            | (
+                (season_base["팀"].astype(str) == selected_team_b)
+                & (
+                    season_base["공격수"].astype(str)
+                    == selected_player_b
+                )
+            )
+        ].copy()
 
     available_competitions = set(
         scope_source["대회구분"]
@@ -510,7 +568,10 @@ with st.sidebar:
         "정규리그 전체",
     ]
 
-    if any(comp in available_competitions for comp in POSTSEASON):
+    if any(
+        comp in available_competitions
+        for comp in POSTSEASON
+    ):
         scope_options.append("포스트시즌 전체")
 
     for round_name in [
@@ -591,7 +652,9 @@ with st.sidebar:
                 game_labels,
                 index=0,
             )
-            selected_game_key = game_label_map[selected_game_label]
+            selected_game_key = game_label_map[
+                selected_game_label
+            ]
 
 
 # ==========================================
@@ -675,9 +738,26 @@ if (
     and selected_player_a is not None
     and selected_player_b is not None
 ):
-    compare_base = scope_team_rows[
-        scope_team_rows["공격수"].astype(str).isin(
-            [selected_player_a, selected_player_b]
+    compare_base = apply_attack_scope(
+        season_base,
+        selected_scope,
+        selected_game_key,
+    )
+
+    compare_base = compare_base[
+        (
+            (compare_base["팀"].astype(str) == selected_team_a)
+            & (
+                compare_base["공격수"].astype(str)
+                == selected_player_a
+            )
+        )
+        | (
+            (compare_base["팀"].astype(str) == selected_team_b)
+            & (
+                compare_base["공격수"].astype(str)
+                == selected_player_b
+            )
         )
     ].copy()
 
@@ -693,13 +773,19 @@ if (
             st.markdown(f"**선택 경기:** {selected_game_label}")
 
         player_a_df = compare_base[
-            compare_base["공격수"].astype(str)
-            == selected_player_a
+            (compare_base["팀"].astype(str) == selected_team_a)
+            & (
+                compare_base["공격수"].astype(str)
+                == selected_player_a
+            )
         ].copy()
 
         player_b_df = compare_base[
-            compare_base["공격수"].astype(str)
-            == selected_player_b
+            (compare_base["팀"].astype(str) == selected_team_b)
+            & (
+                compare_base["공격수"].astype(str)
+                == selected_player_b
+            )
         ].copy()
 
         def comparison_rows(player_df):
@@ -776,6 +862,29 @@ if (
             how="outer",
             suffixes=("_A", "_B"),
         ).fillna(0)
+
+        situation_order = [
+            "전체",
+            "후반 5점차 이내",
+            "후반 3점차 이내",
+            "접전 세트",
+            "듀스 세트",
+            "경기 결정 세트",
+        ]
+
+        compare_df["상황"] = pd.Categorical(
+            compare_df["상황"],
+            categories=situation_order,
+            ordered=True,
+        )
+
+        compare_df = (
+            compare_df
+            .sort_values("상황")
+            .reset_index(drop=True)
+        )
+
+        compare_df["상황"] = compare_df["상황"].astype(str)
 
         # 선수 소속팀 색상
         def player_team_meta(df):
@@ -929,63 +1038,102 @@ if (
         )
 
         st.markdown("### 상세 비교")
+        st.caption(
+            "같은 지표의 두 선수 값을 바로 옆에 배치했습니다."
+        )
 
-        detail_table = pd.DataFrame(
+        attempts_table = pd.DataFrame(
             {
                 "상황": compare_df["상황"],
-                f"시도 · {selected_player_a}": (
+                selected_player_a: (
                     compare_df["공격시도_A"]
                     .astype(int)
                 ),
-                f"시도 · {selected_player_b}": (
+                selected_player_b: (
                     compare_df["공격시도_B"]
                     .astype(int)
                 ),
-                f"성공률 · {selected_player_a}": (
+            }
+        )
+
+        success_table = pd.DataFrame(
+            {
+                "상황": compare_df["상황"],
+                selected_player_a: (
                     compare_df["공격성공률_%_A"]
                     .round(1)
                 ),
-                f"성공률 · {selected_player_b}": (
+                selected_player_b: (
                     compare_df["공격성공률_%_B"]
                     .round(1)
                 ),
-                f"효율 · {selected_player_a}": (
+            }
+        )
+
+        efficiency_table = pd.DataFrame(
+            {
+                "상황": compare_df["상황"],
+                selected_player_a: (
                     compare_df["공격효율_%_A"]
                     .round(1)
                 ),
-                f"효율 · {selected_player_b}": (
+                selected_player_b: (
                     compare_df["공격효율_%_B"]
                     .round(1)
                 ),
             }
         )
 
-        compare_table_height = (
+        compact_height = (
             58
-            + 54 * len(detail_table)
+            + 54 * len(compare_df)
             + 8
         )
 
-        st.dataframe(
-            detail_table,
-            use_container_width=True,
-            hide_index=True,
-            height=compare_table_height,
-            column_config={
-                f"성공률 · {selected_player_a}": st.column_config.NumberColumn(
-                    format="%.1f%%"
-                ),
-                f"성공률 · {selected_player_b}": st.column_config.NumberColumn(
-                    format="%.1f%%"
-                ),
-                f"효율 · {selected_player_a}": st.column_config.NumberColumn(
-                    format="%.1f%%"
-                ),
-                f"효율 · {selected_player_b}": st.column_config.NumberColumn(
-                    format="%.1f%%"
-                ),
-            },
-        )
+        t1, t2, t3 = st.columns(3)
+
+        with t1:
+            st.markdown("#### 공격 시도")
+            st.dataframe(
+                attempts_table,
+                use_container_width=True,
+                hide_index=True,
+                height=compact_height,
+            )
+
+        with t2:
+            st.markdown("#### 공격 성공률")
+            st.dataframe(
+                success_table,
+                use_container_width=True,
+                hide_index=True,
+                height=compact_height,
+                column_config={
+                    selected_player_a: st.column_config.NumberColumn(
+                        format="%.1f%%"
+                    ),
+                    selected_player_b: st.column_config.NumberColumn(
+                        format="%.1f%%"
+                    ),
+                },
+            )
+
+        with t3:
+            st.markdown("#### 공격 효율")
+            st.dataframe(
+                efficiency_table,
+                use_container_width=True,
+                hide_index=True,
+                height=compact_height,
+                column_config={
+                    selected_player_a: st.column_config.NumberColumn(
+                        format="%.1f%%"
+                    ),
+                    selected_player_b: st.column_config.NumberColumn(
+                        format="%.1f%%"
+                    ),
+                },
+            )
 
         if "후반5점차이내" not in compare_base.columns:
             st.caption(
