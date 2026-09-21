@@ -17,6 +17,22 @@ BAR_LABEL_SIZE = 20
 AXIS_TITLE_SIZE = 22
 AXIS_TICK_SIZE = 20
 X_AXIS_TEXT_COLOR = "black"
+CHART_TEXT_COLOR = "black"
+
+# ==========================================
+# 팀 대표 색상
+# 사이트 시각화용으로 일관되게 사용
+# ==========================================
+TEAM_COLORS = {
+    "GS칼텍스": "#00718F",
+    "IBK기업은행": "#0055A4",
+    "정관장": "#C8102E",
+    "페퍼저축은행": "#E61E4D",
+    "한국도로공사": "#005BAC",
+    "현대건설": "#F4B400",
+    "흥국생명": "#D6006D",
+}
+
 
 st.set_page_config(
     page_title="팀 분석 | 여자배구 데이터 대시보드",
@@ -27,8 +43,10 @@ st.set_page_config(
 st.markdown(
     f"""
     <style>
-    html, body, [class*="css"] {{ font-size: {BODY_TEXT_SIZE}px; }}
-    .stMarkdown, .stCaption, .stMetric, label, p, div {{ font-size: {BODY_TEXT_SIZE}px; }}
+    html, body, [class*="css"] {{
+        color: black; font-size: {BODY_TEXT_SIZE}px; }}
+    .stMarkdown, .stCaption, .stMetric, label, p, div {{
+        color: black; font-size: {BODY_TEXT_SIZE}px; }}
     h1 {{ font-size: {PAGE_TITLE_SIZE}px !important; }}
     h2 {{ font-size: {SECTION_TITLE_SIZE}px !important; }}
     h3 {{ font-size: {SUBSECTION_TITLE_SIZE}px !important; }}
@@ -160,6 +178,8 @@ with st.sidebar:
             team_df["대회구분"].astype(str) == selected_scope
         ]
 
+selected_team_color = TEAM_COLORS.get(selected_team, "#4C6EF5")
+
 st.subheader(selected_team)
 
 attempts = len(team_df)
@@ -212,6 +232,7 @@ fig_set = px.bar(
 )
 
 fig_set.update_traces(
+    marker_color=selected_team_color,
     text=[
         f"{rate:.1f}%<br>({attempt:,}회)"
         for rate, attempt in zip(
@@ -221,13 +242,13 @@ fig_set.update_traces(
     ],
     textposition="outside",
     cliponaxis=False,
-    textfont=dict(size=BAR_LABEL_SIZE),
+    textfont=dict(size=BAR_LABEL_SIZE, color=CHART_TEXT_COLOR),
 )
 
 fig_set.update_layout(
     height=520,
     margin=dict(l=20, r=20, t=70, b=20),
-    font=dict(size=BODY_TEXT_SIZE),
+    font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
     xaxis=dict(
         tickmode="linear",
         dtick=1,
@@ -235,8 +256,8 @@ fig_set.update_layout(
         title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR),
     ),
     yaxis=dict(
-        tickfont=dict(size=BODY_TEXT_SIZE),
-        title_font=dict(size=AXIS_TITLE_SIZE),
+        tickfont=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
+        title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
     ),
 )
 
@@ -293,6 +314,7 @@ fig_score = px.bar(
 )
 
 fig_score.update_traces(
+    marker_color=selected_team_color,
     text=[
         f"{rate:.1f}%<br>({attempt:,}회)"
         for rate, attempt in zip(
@@ -302,17 +324,17 @@ fig_score.update_traces(
     ],
     textposition="outside",
     cliponaxis=False,
-    textfont=dict(size=BAR_LABEL_SIZE),
+    textfont=dict(size=BAR_LABEL_SIZE, color=CHART_TEXT_COLOR),
 )
 
 fig_score.update_layout(
     height=500,
     margin=dict(l=20, r=20, t=70, b=20),
-    font=dict(size=BODY_TEXT_SIZE),
+    font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
     xaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE, color=X_AXIS_TEXT_COLOR)),
     yaxis=dict(
-        tickfont=dict(size=BODY_TEXT_SIZE),
-        title_font=dict(size=AXIS_TITLE_SIZE),
+        tickfont=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
+        title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
     ),
 )
 
@@ -393,23 +415,24 @@ fig_player = px.bar(
 )
 
 fig_player.update_traces(
+    marker_color=selected_team_color,
     text=[
         f"{share:.1f}%"
         for share in player_summary["공격점유율_%"]
     ],
     textposition="outside",
     cliponaxis=False,
-    textfont=dict(size=TEAM_NAME_SIZE),
+    textfont=dict(size=TEAM_NAME_SIZE, color=CHART_TEXT_COLOR),
 )
 
 fig_player.update_layout(
     height=540,
     margin=dict(l=20, r=20, t=70, b=80),
-    font=dict(size=BODY_TEXT_SIZE),
+    font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
     xaxis=dict(tickfont=dict(size=TEAM_NAME_SIZE, color=X_AXIS_TEXT_COLOR)),
     yaxis=dict(
-        tickfont=dict(size=BODY_TEXT_SIZE),
-        title_font=dict(size=AXIS_TITLE_SIZE),
+        tickfont=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
+        title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
     ),
 )
 
