@@ -74,20 +74,32 @@ with st.sidebar:
     ]
 
     # 앞으로 모든 분석 페이지에서 이 순서를 기준으로 사용
-    game_scope_options = [
+    # 포스트시즌 관련 항목은 선택한 팀이 실제로 참가한 경우에만 표시
+    regular_scope_options = [
         "전체",
         "정규리그",
-        "포스트시즌",
         "1라운드",
         "2라운드",
         "3라운드",
         "4라운드",
         "5라운드",
         "6라운드",
-        "준플레이오프",
-        "플레이오프",
-        "챔피언결정전",
     ]
+
+    team_competitions = set(
+        team_base["대회구분"].dropna().astype(str).unique().tolist()
+    )
+
+    participated_postseason = [
+        comp for comp in postseason_competitions
+        if comp in team_competitions
+    ]
+
+    game_scope_options = regular_scope_options.copy()
+
+    if participated_postseason:
+        game_scope_options.insert(2, "포스트시즌")
+        game_scope_options.extend(participated_postseason)
 
     selected_scope = st.selectbox(
         "경기 구분",
