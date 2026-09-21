@@ -445,21 +445,23 @@ with st.sidebar:
             .tolist()
         )
 
-        player_options = ["전체 선수"] + available_players
+        player_options = available_players
 
-        selected_player = st.selectbox(
-            "선수",
-            player_options,
-            index=0,
-        )
+        if player_options:
+            selected_player = st.selectbox(
+                "선수",
+                player_options,
+                index=0,
+            )
 
-        scope_source = position_base.copy()
-
-        if selected_player != "전체 선수":
-            scope_source = scope_source[
-                scope_source["공격수"].astype(str)
+            scope_source = position_base[
+                position_base["공격수"].astype(str)
                 == selected_player
-            ]
+            ].copy()
+        else:
+            selected_player = None
+            scope_source = position_base.iloc[0:0].copy()
+            st.info("현재 조건에 해당하는 선수가 없습니다.")
 
     else:
         # 비교 모드에서는 팀 A / 팀 B를 독립적으로 선택
@@ -1157,7 +1159,10 @@ if (
 # 개별 선수 상세
 # ==========================================
 
-if selected_player != "전체 선수":
+if (
+    analysis_mode == "개별 선수"
+    and selected_player is not None
+):
     player_df = scope_team_rows[
         scope_team_rows["공격수"].astype(str)
         == selected_player
