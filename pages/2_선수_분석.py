@@ -442,6 +442,14 @@ with st.sidebar:
                 team_base["팀"].astype(str) == selected_team
             ]
 
+        selected_team_codes = (
+            team_base["팀코드"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
         # 4) 포지션
         position_options = ["전체 포지션"] + sorted(
             team_base["공격수포지션"]
@@ -466,12 +474,39 @@ with st.sidebar:
             ]
 
         # 5) 선수
-        available_players = sorted(
+        attack_players = set(
             position_base["공격수"]
             .dropna()
             .astype(str)
-            .unique()
             .tolist()
+        )
+
+        receive_player_pool = receives[
+            receives["시즌코드"].astype(str)
+            == str(selected_season_code)
+        ].copy()
+
+        if selected_team != "전체 팀":
+            receive_player_pool = receive_player_pool[
+                receive_player_pool["팀코드"]
+                .astype(str)
+                .isin(selected_team_codes)
+            ]
+
+        receive_players = set()
+
+        # 리시브 데이터에는 포지션 정보가 없으므로,
+        # 전체 포지션일 때는 공격 기록이 없는 리베로/수비 선수까지 포함합니다.
+        if selected_position == "전체 포지션":
+            receive_players = set(
+                receive_player_pool["선수"]
+                .dropna()
+                .astype(str)
+                .tolist()
+            )
+
+        available_players = sorted(
+            attack_players | receive_players
         )
 
         player_options = available_players
@@ -483,10 +518,36 @@ with st.sidebar:
                 index=0,
             )
 
-            scope_source = position_base[
+            # 분석 범위 선택지는 공격 기록이 있으면 공격 기록,
+            # 공격 기록이 없는 선수(예: 리베로)는 리시브 기록 기준으로 구성합니다.
+            attack_scope_source = position_base[
                 position_base["공격수"].astype(str)
                 == selected_player
             ].copy()
+
+            if not attack_scope_source.empty:
+                scope_source = attack_scope_source
+            else:
+                receive_scope_source = receive_player_pool[
+                    receive_player_pool["선수"].astype(str)
+                    == selected_player
+                ].copy()
+
+                # 리시브 데이터의 필드명을 공격 데이터의 범위 선택용 형식에 맞춤
+                scope_source = pd.DataFrame(
+                    {
+                        "대회구분": receive_scope_source["대회구분"],
+                        "경기구분": (
+                            receive_scope_source["라운드"]
+                            .astype(str)
+                            .map(lambda x: f"{x}라운드")
+                        ),
+                        "경기일": receive_scope_source["경기일"],
+                        "경기번호": receive_scope_source["경기번호"],
+                        "팀": receive_scope_source["팀"],
+                        "상대팀": "",
+                    }
+                )
         else:
             selected_player = None
             scope_source = position_base.iloc[0:0].copy()
@@ -719,8 +780,9 @@ receive_scope = receives[
 
 if selected_team != "전체 팀":
     receive_scope = receive_scope[
-        receive_scope["팀"].astype(str)
-        == selected_team
+        receive_scope["팀코드"]
+        .astype(str)
+        .isin(selected_team_codes)
     ]
 
 receive_scope = apply_receive_scope(
@@ -1231,16 +1293,21 @@ if (
     if selected_game_label:
         st.markdown(f"**선택 경기:** {selected_game_label}")
 
-    if player_df.empty:
-        st.info("선택한 범위에서 이 선수의 공격 기록이 없습니다.")
+    if player_df.empty and player_receive_df.empty:
+        st.info("선택한 범위에서 이 선수의 기록이 없습니다.")
 
     else:
         attack = attack_summary(player_df)
         receive = receive_summary(player_receive_df)
 
-        player_team = str(player_df["팀"].iloc[0])
-        player_team_code = str(player_df["팀코드"].iloc[0])
-        player_season_code = str(player_df["시즌코드"].iloc[0])
+        if not player_df.empty:
+            player_team = str(player_df["팀"].iloc[0])
+            player_team_code = str(player_df["팀코드"].iloc[0])
+            player_season_code = str(player_df["시즌코드"].iloc[0])
+        else:
+            player_team = str(player_receive_df["팀"].iloc[0])
+            player_team_code = str(player_receive_df["팀코드"].iloc[0])
+            player_season_code = str(player_receive_df["시즌코드"].iloc[0])
 
         team_attempts = len(
             scope_team_rows[
@@ -1299,270 +1366,145 @@ if (
             player_team_code,
         )
 
-        # ------------------------------
-        # 세트별
-        # ------------------------------
-        st.divider()
-        st.subheader("세트별 공격")
-
-        set_summary = (
-            player_df
-            .groupby("세트")
-            .agg(
-                공격시도=("공격수", "size"),
-                공격성공=("공격성공", "sum"),
-                공격범실=("공격범실", "sum"),
-                블로킹당함=("블로킹당함", "sum"),
+        if player_df.empty:
+            st.info(
+                "이 선수는 선택한 범위에서 공격 기록이 없어 "
+                "공격 상황별 그래프는 표시하지 않습니다."
             )
-            .reset_index()
-        )
 
-        set_summary["공격성공률_%"] = (
-            set_summary["공격성공"]
-            / set_summary["공격시도"]
-            * 100
-        )
+        if not player_df.empty:
+            # ------------------------------
+            # 세트별
+            # ------------------------------
+            st.divider()
+            st.subheader("세트별 공격")
 
-        set_summary["공격효율_%"] = (
-            (
+            set_summary = (
+                player_df
+                .groupby("세트")
+                .agg(
+                    공격시도=("공격수", "size"),
+                    공격성공=("공격성공", "sum"),
+                    공격범실=("공격범실", "sum"),
+                    블로킹당함=("블로킹당함", "sum"),
+                )
+                .reset_index()
+            )
+
+            set_summary["공격성공률_%"] = (
                 set_summary["공격성공"]
-                - set_summary["공격범실"]
-                - set_summary["블로킹당함"]
-            )
-            / set_summary["공격시도"]
-            * 100
-        )
-
-        fig_set = make_rate_bar(
-            set_summary,
-            "세트",
-            "세트별 공격 성공률",
-            player_color,
-        )
-
-        fig_set.update_xaxes(
-            tickmode="linear",
-            dtick=1,
-        )
-
-        st.plotly_chart(
-            fig_set,
-            use_container_width=True,
-        )
-
-        # ------------------------------
-        # 점수대별
-        # ------------------------------
-        st.divider()
-        st.subheader("점수대별 공격")
-
-        score_order = [
-            "0점대",
-            "10점대",
-            "20점 이후",
-        ]
-
-        score_summary = (
-            player_df
-            .groupby("점수대")
-            .agg(
-                공격시도=("공격수", "size"),
-                공격성공=("공격성공", "sum"),
-                공격범실=("공격범실", "sum"),
-                블로킹당함=("블로킹당함", "sum"),
-            )
-            .reset_index()
-        )
-
-        score_summary["공격성공률_%"] = (
-            score_summary["공격성공"]
-            / score_summary["공격시도"]
-            * 100
-        )
-
-        score_summary["공격효율_%"] = (
-            (
-                score_summary["공격성공"]
-                - score_summary["공격범실"]
-                - score_summary["블로킹당함"]
-            )
-            / score_summary["공격시도"]
-            * 100
-        )
-
-        score_summary["점수대"] = pd.Categorical(
-            score_summary["점수대"],
-            categories=score_order,
-            ordered=True,
-        )
-
-        score_summary = score_summary.sort_values("점수대")
-
-        fig_score = make_rate_bar(
-            score_summary,
-            "점수대",
-            "점수대별 공격 성공률",
-            player_color,
-        )
-
-        st.plotly_chart(
-            fig_score,
-            use_container_width=True,
-        )
-
-        st.caption(
-            "점수대는 공격하는 팀의 공격 직전 점수를 기준으로 구분합니다."
-        )
-
-        # ------------------------------
-        # 접전 상황
-        # ------------------------------
-        st.divider()
-        st.subheader("접전 상황 공격")
-
-        close_rows = []
-
-        plain3_mask = plain_three_point_mask(player_df)
-
-        if plain3_mask is not None:
-            close3 = player_df[plain3_mask]
-            s = attack_summary(close3)
-
-            close_rows.append(
-                {
-                    "상황": "3점차 이내",
-                    "공격 시도": s["공격시도"],
-                    "공격 성공": s["공격성공"],
-                    "공격 성공률 (%)": round(
-                        s["공격성공률_%"],
-                        1,
-                    ),
-                    "공격 효율 (%)": round(
-                        s["공격효율_%"],
-                        1,
-                    ),
-                    "전체 공격 중 비중 (%)": round(
-                        s["공격시도"]
-                        / attack["공격시도"]
-                        * 100
-                        if attack["공격시도"]
-                        else 0,
-                        1,
-                    ),
-                }
+                / set_summary["공격시도"]
+                * 100
             )
 
-        if "후반3점차이내" in player_df.columns:
-            clutch3 = player_df[
-                player_df["후반3점차이내"] == True
-            ]
-            s = attack_summary(clutch3)
-
-            close_rows.append(
-                {
-                    "상황": "후반 3점차 이내",
-                    "공격 시도": s["공격시도"],
-                    "공격 성공": s["공격성공"],
-                    "공격 성공률 (%)": round(
-                        s["공격성공률_%"],
-                        1,
-                    ),
-                    "공격 효율 (%)": round(
-                        s["공격효율_%"],
-                        1,
-                    ),
-                    "전체 공격 중 비중 (%)": round(
-                        s["공격시도"]
-                        / attack["공격시도"]
-                        * 100
-                        if attack["공격시도"]
-                        else 0,
-                        1,
-                    ),
-                }
+            set_summary["공격효율_%"] = (
+                (
+                    set_summary["공격성공"]
+                    - set_summary["공격범실"]
+                    - set_summary["블로킹당함"]
+                )
+                / set_summary["공격시도"]
+                * 100
             )
 
-        if "후반5점차이내" in player_df.columns:
-            clutch5 = player_df[
-                player_df["후반5점차이내"] == True
-            ]
-            s = attack_summary(clutch5)
-
-            close_rows.append(
-                {
-                    "상황": "후반 5점차 이내",
-                    "공격 시도": s["공격시도"],
-                    "공격 성공": s["공격성공"],
-                    "공격 성공률 (%)": round(
-                        s["공격성공률_%"],
-                        1,
-                    ),
-                    "공격 효율 (%)": round(
-                        s["공격효율_%"],
-                        1,
-                    ),
-                    "전체 공격 중 비중 (%)": round(
-                        s["공격시도"]
-                        / attack["공격시도"]
-                        * 100
-                        if attack["공격시도"]
-                        else 0,
-                        1,
-                    ),
-                }
+            fig_set = make_rate_bar(
+                set_summary,
+                "세트",
+                "세트별 공격 성공률",
+                player_color,
             )
 
-        if close_rows:
-            close_df = pd.DataFrame(close_rows)
-            st.dataframe(
-                close_df,
+            fig_set.update_xaxes(
+                tickmode="linear",
+                dtick=1,
+            )
+
+            st.plotly_chart(
+                fig_set,
                 use_container_width=True,
-                hide_index=True,
-                height=58 + 54 * len(close_df) + 8,
+            )
+
+            # ------------------------------
+            # 점수대별
+            # ------------------------------
+            st.divider()
+            st.subheader("점수대별 공격")
+
+            score_order = [
+                "0점대",
+                "10점대",
+                "20점 이후",
+            ]
+
+            score_summary = (
+                player_df
+                .groupby("점수대")
+                .agg(
+                    공격시도=("공격수", "size"),
+                    공격성공=("공격성공", "sum"),
+                    공격범실=("공격범실", "sum"),
+                    블로킹당함=("블로킹당함", "sum"),
+                )
+                .reset_index()
+            )
+
+            score_summary["공격성공률_%"] = (
+                score_summary["공격성공"]
+                / score_summary["공격시도"]
+                * 100
+            )
+
+            score_summary["공격효율_%"] = (
+                (
+                    score_summary["공격성공"]
+                    - score_summary["공격범실"]
+                    - score_summary["블로킹당함"]
+                )
+                / score_summary["공격시도"]
+                * 100
+            )
+
+            score_summary["점수대"] = pd.Categorical(
+                score_summary["점수대"],
+                categories=score_order,
+                ordered=True,
+            )
+
+            score_summary = score_summary.sort_values("점수대")
+
+            fig_score = make_rate_bar(
+                score_summary,
+                "점수대",
+                "점수대별 공격 성공률",
+                player_color,
+            )
+
+            st.plotly_chart(
+                fig_score,
+                use_container_width=True,
             )
 
             st.caption(
-                "3점차 이내는 공격 직전 점수 기준으로 세트 진행 시점과 관계없이 "
-                "점수차가 3점 이내인 공격입니다. 후반 3점차 이내는 1~4세트는 한 팀이라도 "
-                "20점 이상, 5세트는 한 팀이라도 10점 이상인 후반 상황까지 함께 적용합니다."
+                "점수대는 공격하는 팀의 공격 직전 점수를 기준으로 구분합니다."
             )
 
-            if "후반5점차이내" not in player_df.columns:
-                st.caption(
-                    "※ 후반 5점차 이내 지표는 현재 저장된 공격 데이터에 "
-                    "별도 플래그가 없어, 다음 원점수 데이터 갱신 때 추가합니다."
-                )
-
-        # ------------------------------
-        # 세트 상황별
-        # ------------------------------
-        situation_cols = [
-            ("접전세트", "접전 세트"),
-            ("듀스세트", "듀스 세트"),
-            ("경기결정세트", "경기 결정 세트"),
-        ]
-
-        available_situations = [
-            item
-            for item in situation_cols
-            if item[0] in player_df.columns
-        ]
-
-        if available_situations:
+            # ------------------------------
+            # 접전 상황
+            # ------------------------------
             st.divider()
-            st.subheader("세트 상황별 공격")
+            st.subheader("접전 상황 공격")
 
-            situation_rows = []
+            close_rows = []
 
-            for col, label in available_situations:
-                situation_df = player_df[
-                    player_df[col] == True
-                ]
-                s = attack_summary(situation_df)
+            plain3_mask = plain_three_point_mask(player_df)
 
-                situation_rows.append(
+            if plain3_mask is not None:
+                close3 = player_df[plain3_mask]
+                s = attack_summary(close3)
+
+                close_rows.append(
                     {
-                        "상황": label,
+                        "상황": "3점차 이내",
                         "공격 시도": s["공격시도"],
                         "공격 성공": s["공격성공"],
                         "공격 성공률 (%)": round(
@@ -1573,17 +1515,149 @@ if (
                             s["공격효율_%"],
                             1,
                         ),
+                        "전체 공격 중 비중 (%)": round(
+                            s["공격시도"]
+                            / attack["공격시도"]
+                            * 100
+                            if attack["공격시도"]
+                            else 0,
+                            1,
+                        ),
                     }
                 )
 
-            situation_df = pd.DataFrame(situation_rows)
+            if "후반3점차이내" in player_df.columns:
+                clutch3 = player_df[
+                    player_df["후반3점차이내"] == True
+                ]
+                s = attack_summary(clutch3)
 
-            st.dataframe(
-                situation_df,
-                use_container_width=True,
-                hide_index=True,
-                height=58 + 54 * len(situation_df) + 8,
-            )
+                close_rows.append(
+                    {
+                        "상황": "후반 3점차 이내",
+                        "공격 시도": s["공격시도"],
+                        "공격 성공": s["공격성공"],
+                        "공격 성공률 (%)": round(
+                            s["공격성공률_%"],
+                            1,
+                        ),
+                        "공격 효율 (%)": round(
+                            s["공격효율_%"],
+                            1,
+                        ),
+                        "전체 공격 중 비중 (%)": round(
+                            s["공격시도"]
+                            / attack["공격시도"]
+                            * 100
+                            if attack["공격시도"]
+                            else 0,
+                            1,
+                        ),
+                    }
+                )
+
+            if "후반5점차이내" in player_df.columns:
+                clutch5 = player_df[
+                    player_df["후반5점차이내"] == True
+                ]
+                s = attack_summary(clutch5)
+
+                close_rows.append(
+                    {
+                        "상황": "후반 5점차 이내",
+                        "공격 시도": s["공격시도"],
+                        "공격 성공": s["공격성공"],
+                        "공격 성공률 (%)": round(
+                            s["공격성공률_%"],
+                            1,
+                        ),
+                        "공격 효율 (%)": round(
+                            s["공격효율_%"],
+                            1,
+                        ),
+                        "전체 공격 중 비중 (%)": round(
+                            s["공격시도"]
+                            / attack["공격시도"]
+                            * 100
+                            if attack["공격시도"]
+                            else 0,
+                            1,
+                        ),
+                    }
+                )
+
+            if close_rows:
+                close_df = pd.DataFrame(close_rows)
+                st.dataframe(
+                    close_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=58 + 54 * len(close_df) + 8,
+                )
+
+                st.caption(
+                    "3점차 이내는 공격 직전 점수 기준으로 세트 진행 시점과 관계없이 "
+                    "점수차가 3점 이내인 공격입니다. 후반 3점차 이내는 1~4세트는 한 팀이라도 "
+                    "20점 이상, 5세트는 한 팀이라도 10점 이상인 후반 상황까지 함께 적용합니다."
+                )
+
+                if "후반5점차이내" not in player_df.columns:
+                    st.caption(
+                        "※ 후반 5점차 이내 지표는 현재 저장된 공격 데이터에 "
+                        "별도 플래그가 없어, 다음 원점수 데이터 갱신 때 추가합니다."
+                    )
+
+            # ------------------------------
+            # 세트 상황별
+            # ------------------------------
+            situation_cols = [
+                ("접전세트", "접전 세트"),
+                ("듀스세트", "듀스 세트"),
+                ("경기결정세트", "경기 결정 세트"),
+            ]
+
+            available_situations = [
+                item
+                for item in situation_cols
+                if item[0] in player_df.columns
+            ]
+
+            if available_situations:
+                st.divider()
+                st.subheader("세트 상황별 공격")
+
+                situation_rows = []
+
+                for col, label in available_situations:
+                    situation_df = player_df[
+                        player_df[col] == True
+                    ]
+                    s = attack_summary(situation_df)
+
+                    situation_rows.append(
+                        {
+                            "상황": label,
+                            "공격 시도": s["공격시도"],
+                            "공격 성공": s["공격성공"],
+                            "공격 성공률 (%)": round(
+                                s["공격성공률_%"],
+                                1,
+                            ),
+                            "공격 효율 (%)": round(
+                                s["공격효율_%"],
+                                1,
+                            ),
+                        }
+                    )
+
+                situation_df = pd.DataFrame(situation_rows)
+
+                st.dataframe(
+                    situation_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=58 + 54 * len(situation_df) + 8,
+                )
 
 
 if analysis_mode == "개별 선수":
