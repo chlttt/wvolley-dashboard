@@ -8,6 +8,30 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+    /* larger dashboard typography */
+    html, body, [class*="css"]  {
+        font-size: 20px;
+    }
+    .stMarkdown, .stCaption, .stMetric, label, p, div {
+        font-size: 20px;
+    }
+    h1 { font-size: 52px !important; }
+    h2 { font-size: 40px !important; }
+    h3 { font-size: 32px !important; }
+    [data-testid="stMetricValue"] {
+        font-size: 46px !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 22px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 @st.cache_data
 def load_routes():
     df = pd.read_parquet("season_routes_2526.parquet")
@@ -135,6 +159,7 @@ fig_team = px.bar(
 )
 
 fig_team.update_traces(
+    textfont=dict(size=20),
     text=[
         f"{rate:.1f}%<br>({attempts:,}회)"
         for rate, attempts in zip(
@@ -147,9 +172,12 @@ fig_team.update_traces(
 )
 
 fig_team.update_layout(
-    height=460,
-    margin=dict(l=10, r=10, t=55, b=10),
+    height=520,
+    margin=dict(l=20, r=20, t=70, b=20),
     hovermode="x unified",
+    font=dict(size=20),
+    xaxis=dict(tickfont=dict(size=20), title_font=dict(size=22)),
+    yaxis=dict(tickfont=dict(size=20), title_font=dict(size=22)),
 )
 
 fig_team.update_yaxes(
@@ -213,6 +241,7 @@ fig_set = px.bar(
 )
 
 fig_set.update_traces(
+    textfont=dict(size=20),
     text=[
         f"{rate:.1f}%<br>({attempts:,}회)"
         for rate, attempts in zip(
@@ -225,8 +254,11 @@ fig_set.update_traces(
 )
 
 fig_set.update_layout(
-    height=430,
-    margin=dict(l=10, r=10, t=55, b=10),
+    height=500,
+    margin=dict(l=20, r=20, t=70, b=20),
+    font=dict(size=20),
+    xaxis=dict(tickfont=dict(size=20), title_font=dict(size=22)),
+    yaxis=dict(tickfont=dict(size=20), title_font=dict(size=22)),
 )
 
 fig_set.update_yaxes(
