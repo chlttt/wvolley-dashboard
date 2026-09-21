@@ -2,6 +2,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from team_config import get_team_color
+
 # ==========================================
 # 글씨 크기 설정
 # 숫자만 바꾸면 해당 글씨 크기가 변경됩니다.
@@ -19,19 +21,6 @@ AXIS_TICK_SIZE = 20
 X_AXIS_TEXT_COLOR = "black"
 CHART_TEXT_COLOR = "black"
 
-# ==========================================
-# 팀 대표 색상
-# 사이트 시각화용으로 일관되게 사용
-# ==========================================
-TEAM_COLORS = {
-    "GS칼텍스": "#00718F",
-    "IBK기업은행": "#0055A4",
-    "정관장": "#C8102E",
-    "페퍼저축은행": "#E61E4D",
-    "한국도로공사": "#005BAC",
-    "현대건설": "#F4B400",
-    "흥국생명": "#D6006D",
-}
 
 
 st.set_page_config(
@@ -180,7 +169,10 @@ st.subheader("팀별 공격 성공률")
 
 team_summary = (
     filtered
-    .groupby("팀", dropna=False)
+    .groupby(
+        ["시즌코드", "팀코드", "팀"],
+        dropna=False
+    )
     .agg(
         공격시도=("공격수", "size"),
         공격성공=("공격성공", "sum"),
@@ -198,12 +190,25 @@ team_summary = team_summary.sort_values(
     ascending=False
 )
 
+team_summary["팀색상"] = team_summary.apply(
+    lambda row: get_team_color(
+        row["시즌코드"],
+        row["팀코드"]
+    ),
+    axis=1,
+)
+
 fig_team = px.bar(
     team_summary,
     x="팀",
     y="공격성공률_%",
     color="팀",
-    color_discrete_map=TEAM_COLORS,
+    color_discrete_map=dict(
+        zip(
+            team_summary["팀"],
+            team_summary["팀색상"]
+        )
+    ),
     hover_data={
         "공격시도": ":,",
         "공격성공": ":,",
