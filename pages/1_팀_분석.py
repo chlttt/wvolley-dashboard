@@ -493,6 +493,29 @@ if analysis_level == "선수":
         * 100
     ).round(1)
 
+    if selected_scope in ["전체", "정규리그"]:
+        default_min_attempts = 20
+    elif selected_scope == "포스트시즌" or selected_scope.endswith("라운드"):
+        default_min_attempts = 10
+    else:
+        default_min_attempts = 5
+
+    min_attempts = st.number_input(
+        "최소 공격 시도",
+        min_value=1,
+        max_value=max(int(cross_df["공격시도"].max()), 1),
+        value=min(
+            default_min_attempts,
+            max(int(cross_df["공격시도"].max()), 1),
+        ),
+        step=1,
+        key="player_cross_min_attempts",
+    )
+
+    cross_df = cross_df[
+        cross_df["공격시도"] >= min_attempts
+    ].copy()
+
     metric_map = {
         "공격점유율 × 공격효율": ("공격점유율_%", "공격효율_%"),
         "공격점유율 × 공격성공률": ("공격점유율_%", "공격성공률_%"),
@@ -505,7 +528,6 @@ if analysis_level == "선수":
         cross_df,
         x=x_col,
         y=y_col,
-        text="공격수",
         hover_name="공격수",
         hover_data={
             "공격수포지션": True,
@@ -529,36 +551,78 @@ if analysis_level == "선수":
         },
     )
 
-    player_label_positions = [
-        "top center",
-        "bottom center",
-        "middle right",
-        "middle left",
-        "top right",
-        "bottom left",
-        "top left",
-        "bottom right",
-    ]
-
     fig_cross.update_traces(
         marker=dict(
             size=14,
             color=selected_team_color,
             line=dict(width=1, color="black"),
         ),
-        textposition=[
-            player_label_positions[i % len(player_label_positions)]
-            for i in range(len(cross_df))
-        ],
-        textfont=dict(
-            size=15,
-            color="black",
-        ),
     )
 
+    if not cross_df.empty:
+        x_min = cross_df[x_col].min()
+        x_max = cross_df[x_col].max()
+        y_min = cross_df[y_col].min()
+        y_max = cross_df[y_col].max()
+
+        x_span = max(x_max - x_min, 1)
+        y_span = max(y_max - y_min, 1)
+
+        x_padding = max(x_span * 0.18, 2)
+        y_padding = max(y_span * 0.20, 2)
+
+        label_offsets = [
+            (45, -35),
+            (-45, -35),
+            (55, 0),
+            (-55, 0),
+            (45, 35),
+            (-45, 35),
+            (65, -20),
+            (-65, 20),
+        ]
+
+        for i, (_, row) in enumerate(cross_df.reset_index(drop=True).iterrows()):
+            ax_offset, ay_offset = label_offsets[i % len(label_offsets)]
+
+            fig_cross.add_annotation(
+                x=row[x_col],
+                y=row[y_col],
+                text=str(row["공격수"]),
+                showarrow=True,
+                arrowhead=0,
+                arrowsize=1,
+                arrowwidth=1,
+                arrowcolor="black",
+                ax=ax_offset,
+                ay=ay_offset,
+                font=dict(
+                    size=15,
+                    color="black",
+                ),
+                bgcolor="rgba(255,255,255,0.88)",
+                borderpad=2,
+            )
+
+        fig_cross.update_xaxes(
+            range=[
+                x_min - x_padding,
+                x_max + x_padding,
+            ],
+            automargin=True,
+        )
+
+        fig_cross.update_yaxes(
+            range=[
+                y_min - y_padding,
+                y_max + y_padding,
+            ],
+            automargin=True,
+        )
+
     fig_cross.update_layout(
-        height=560,
-        margin=dict(l=20, r=20, t=30, b=20),
+        height=620,
+        margin=dict(l=80, r=110, t=80, b=90),
         font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
         xaxis=dict(
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
@@ -757,7 +821,6 @@ else:
         y=y_col,
         color="팀",
         color_discrete_map=color_map,
-        text="팀",
         hover_name="팀",
         hover_data={
             "공격시도": ":,",
@@ -795,41 +858,55 @@ else:
     x_mid = (x_min + x_max) / 2
     y_mid = (y_min + y_max) / 2
 
-    # 가장자리 팀 이름은 차트 안쪽을 향하도록 배치
-    position_by_team = {}
-
-    for _, row in team_compare.iterrows():
-        x_value = row[x_col]
-        y_value = row[y_col]
-
-        if x_value >= x_mid and y_value >= y_mid:
-            position = "top left"
-        elif x_value >= x_mid and y_value < y_mid:
-            position = "bottom left"
-        elif x_value < x_mid and y_value >= y_mid:
-            position = "top right"
-        else:
-            position = "bottom right"
-
-        position_by_team[row["팀"]] = position
-
     for trace in fig_cross.data:
-        team_name = trace.name
-
         trace.update(
             marker=dict(
                 size=16,
                 line=dict(width=1, color="black"),
             ),
-            textposition=position_by_team.get(
-                team_name,
-                "top center"
-            ),
-            textfont=dict(
+        )
+
+    team_label_offsets = [
+        (55, -35),
+        (-55, -35),
+        (65, 0),
+        (-65, 0),
+        (55, 35),
+        (-55, 35),
+        (0, -55),
+    ]
+
+    for i, (_, row) in enumerate(team_compare.reset_index(drop=True).iterrows()):
+        ax_offset, ay_offset = team_label_offsets[i % len(team_label_offsets)]
+
+        # 가장자리 점은 라벨을 차트 안쪽으로 당김
+        if row[x_col] >= x_mid:
+            ax_offset = -abs(ax_offset)
+        else:
+            ax_offset = abs(ax_offset)
+
+        if row[y_col] >= y_mid:
+            ay_offset = abs(ay_offset)
+        else:
+            ay_offset = -abs(ay_offset)
+
+        fig_cross.add_annotation(
+            x=row[x_col],
+            y=row[y_col],
+            text=str(row["팀"]),
+            showarrow=True,
+            arrowhead=0,
+            arrowsize=1,
+            arrowwidth=1,
+            arrowcolor="black",
+            ax=ax_offset,
+            ay=ay_offset,
+            font=dict(
                 size=16,
                 color="black",
             ),
-            cliponaxis=False,
+            bgcolor="rgba(255,255,255,0.88)",
+            borderpad=2,
         )
 
     fig_cross.update_layout(
