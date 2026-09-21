@@ -58,51 +58,71 @@ st.caption("2025-26 V-League 여자부 팀별 공격 지표")
 with st.sidebar:
     st.header("팀 분석 필터")
 
+    team_options = sorted(
+        routes["팀"].dropna().astype(str).unique().tolist()
+    )
+    selected_team = st.selectbox("팀", team_options)
+
+    team_base = routes[
+        routes["팀"].astype(str) == selected_team
+    ].copy()
+
     postseason_competitions = [
         "준플레이오프",
         "플레이오프",
         "챔피언결정전",
     ]
 
-    competition_order = [
+    # 앞으로 모든 분석 페이지에서 이 순서를 기준으로 사용
+    game_scope_options = [
+        "전체",
         "정규리그",
         "포스트시즌",
+        "1라운드",
+        "2라운드",
+        "3라운드",
+        "4라운드",
+        "5라운드",
+        "6라운드",
         "준플레이오프",
         "플레이오프",
         "챔피언결정전",
     ]
 
-    available_competitions = (
-        routes["대회구분"].dropna().astype(str).unique().tolist()
+    selected_scope = st.selectbox(
+        "경기 구분",
+        game_scope_options,
+        index=0,
     )
 
-    competition_options = ["전체"] + [
-        comp for comp in competition_order
-        if comp == "포스트시즌" or comp in available_competitions
-    ]
-    selected_competition = st.selectbox("대회 구분", competition_options)
+    team_df = team_base.copy()
 
-    base = routes.copy()
-    if selected_competition == "포스트시즌":
-        base = base[
-            base["대회구분"].astype(str).isin(postseason_competitions)
-        ]
-    elif selected_competition != "전체":
-        base = base[base["대회구분"].astype(str) == selected_competition]
-
-    team_options = sorted(base["팀"].dropna().astype(str).unique().tolist())
-    selected_team = st.selectbox("팀", team_options)
-
-    team_df = base[base["팀"].astype(str) == selected_team].copy()
-
-    round_options = ["전체"] + sorted(
-        team_df["경기구분"].dropna().astype(str).unique().tolist()
-    )
-    selected_round = st.selectbox("라운드/경기 구분", round_options)
-
-    if selected_round != "전체":
+    if selected_scope == "정규리그":
         team_df = team_df[
-            team_df["경기구분"].astype(str) == selected_round
+            team_df["대회구분"].astype(str) == "정규리그"
+        ]
+
+    elif selected_scope == "포스트시즌":
+        team_df = team_df[
+            team_df["대회구분"].astype(str).isin(postseason_competitions)
+        ]
+
+    elif selected_scope in [
+        "1라운드",
+        "2라운드",
+        "3라운드",
+        "4라운드",
+        "5라운드",
+        "6라운드",
+    ]:
+        team_df = team_df[
+            (team_df["대회구분"].astype(str) == "정규리그")
+            & (team_df["경기구분"].astype(str) == selected_scope)
+        ]
+
+    elif selected_scope in postseason_competitions:
+        team_df = team_df[
+            team_df["대회구분"].astype(str) == selected_scope
         ]
 
 st.subheader(selected_team)
