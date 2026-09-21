@@ -921,6 +921,10 @@ if (
             f"{selected_player_b}: {b_team_name}"
         )
 
+        st.caption(
+            "접전 기준은 공격 직전 점수를 기준으로 계산합니다."
+        )
+
         st.markdown("### 상황별 공격 성공률 비교")
 
         graph_rows = []
@@ -945,11 +949,22 @@ if (
 
         graph_df = pd.DataFrame(graph_rows)
 
+        # color별 trace로 나뉘어도 각 막대의 라벨이 정확히 따라가도록
+        # 표시 문자열을 각 행에 미리 저장합니다.
+        graph_df["표시"] = graph_df.apply(
+            lambda row: (
+                f"{row['공격성공률_%']:.1f}%"
+                f"<br>({int(row['공격시도']):,}회)"
+            ),
+            axis=1,
+        )
+
         fig_compare = px.bar(
             graph_df,
             x="상황",
             y="공격성공률_%",
             color="선수",
+            text="표시",
             barmode="group",
             color_discrete_map={
                 selected_player_a: a_color,
@@ -960,17 +975,11 @@ if (
                 "상황": "",
                 "공격성공률_%": "공격 성공률 (%)",
                 "선수": "",
+                "표시": "",
             },
         )
 
         fig_compare.update_traces(
-            text=[
-                f"{rate:.1f}%<br>({attempt:,}회)"
-                for rate, attempt in zip(
-                    graph_df["공격성공률_%"],
-                    graph_df["공격시도"],
-                )
-            ],
             textposition="outside",
             cliponaxis=False,
             textfont=dict(
@@ -1430,8 +1439,8 @@ if selected_player != "전체 선수":
             )
 
             st.caption(
-                "후반 3점차 이내: 1~4세트는 한 팀이라도 20점 이상, "
-                "5세트는 한 팀이라도 10점 이상인 상황에서 점수차가 3점 이내인 공격."
+                "후반 3점차 이내: 공격 직전 점수 기준으로 1~4세트는 한 팀이라도 "
+                "20점 이상, 5세트는 한 팀이라도 10점 이상이며 점수차가 3점 이내인 공격."
             )
 
             if "후반5점차이내" not in player_df.columns:
