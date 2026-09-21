@@ -56,12 +56,9 @@ def add_smart_scatter_labels(
     point_size=14,
 ):
     """
-    산점도 라벨 자동 배치 규칙
-    - 라벨끼리 겹치지 않음
-    - 라벨이 다른 점을 덮지 않음
-    - 연결선이 다른 라벨을 가로지르지 않음
-    - 가능한 한 짧고 단순한 연결선을 사용
-    - 첫 화면에서 모든 점과 라벨이 보이도록 여백 확보
+    충돌을 허용하지 않는 산점도 라벨 배치.
+    가능한 후보 중 라벨·점·연결선과 충돌하지 않는 위치만 채택합니다.
+    가까운 위치부터 찾고, 필요할 때만 더 멀리 이동합니다.
     """
 
     if data.empty:
@@ -75,8 +72,7 @@ def add_smart_scatter_labels(
     x_span = max(x_max - x_min, 1.0)
     y_span = max(y_max - y_min, 1.0)
 
-    # 실제 차트 비율에 가까운 가상 픽셀 좌표계
-    plot_w = 1100
+    plot_w = 1120
     plot_h = 520
 
     def to_px(x, y):
@@ -84,7 +80,7 @@ def add_smart_scatter_labels(
         py = (y_max - float(y)) / y_span * plot_h
         return px, py
 
-    def boxes_overlap(a, b, gap=8):
+    def boxes_overlap(a, b, gap=14):
         return not (
             a[2] + gap < b[0]
             or a[0] - gap > b[2]
@@ -92,74 +88,73 @@ def add_smart_scatter_labels(
             or a[1] - gap > b[3]
         )
 
-    def point_in_box(px, py, box, pad=10):
+    def point_in_box(px, py, box, pad=12):
         return (
             box[0] - pad <= px <= box[2] + pad
             and box[1] - pad <= py <= box[3] + pad
         )
 
-    def segment_hits_box(x1, y1, x2, y2, box, samples=24):
-        # 선을 여러 점으로 나눠 다른 라벨 박스를 통과하는지 확인
-        for j in range(1, samples):
-            t = j / samples
+    def segment_point_distance(px, py, x1, y1, x2, y2):
+        dx = x2 - x1
+        dy = y2 - y1
+
+        if dx == 0 and dy == 0:
+            return ((px - x1) ** 2 + (py - y1) ** 2) ** 0.5
+
+        t = (
+            (px - x1) * dx + (py - y1) * dy
+        ) / (dx * dx + dy * dy)
+        t = max(0, min(1, t))
+
+        cx = x1 + t * dx
+        cy = y1 + t * dy
+
+        return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+    def segment_hits_box(x1, y1, x2, y2, box):
+        # 선분을 촘촘히 샘플링해 라벨 박스 통과 여부 확인
+        for j in range(1, 50):
+            t = j / 50
             sx = x1 + (x2 - x1) * t
             sy = y1 + (y2 - y1) * t
-            if point_in_box(sx, sy, box, pad=4):
+
+            if point_in_box(sx, sy, box, pad=6):
                 return True
-        return False
-
-    def segments_too_close(seg1, seg2, threshold=10):
-        # 두 연결선이 서로 지나치게 가까워지는지 근사 검사
-        (x1, y1, x2, y2) = seg1
-        (a1, b1, a2, b2) = seg2
-
-        pts1 = [
-            (
-                x1 + (x2 - x1) * t / 12,
-                y1 + (y2 - y1) * t / 12,
-            )
-            for t in range(1, 12)
-        ]
-        pts2 = [
-            (
-                a1 + (a2 - a1) * t / 12,
-                b1 + (b2 - b1) * t / 12,
-            )
-            for t in range(1, 12)
-        ]
-
-        for px1, py1 in pts1:
-            for px2, py2 in pts2:
-                if (
-                    (px1 - px2) ** 2 + (py1 - py2) ** 2
-                ) ** 0.5 < threshold:
-                    return True
 
         return False
 
-    # 가까운 위치부터 탐색. 단순 수직/수평을 먼저 사용.
-    candidates = [
-        (0, 46),
-        (0, -46),
-        (58, 0),
-        (-58, 0),
-        (52, 38),
-        (-52, 38),
-        (52, -38),
-        (-52, -38),
-        (0, 68),
-        (0, -68),
-        (78, 0),
-        (-78, 0),
-        (70, 48),
-        (-70, 48),
-        (70, -48),
-        (-70, -48),
-        (0, 92),
-        (0, -92),
-        (98, 0),
-        (-98, 0),
-    ]
+    def segments_cross_or_close(seg1, seg2, threshold=11):
+        x1, y1, x2, y2 = seg1
+        a1, b1, a2, b2 = seg2
+
+        # 기존 선 위의 점들과 새 선의 거리 검사
+        for j in range(1, 24):
+            t = j / 24
+            px = a1 + (a2 - a1) * t
+            py = b1 + (b2 - b1) * t
+
+            if segment_point_distance(
+                px, py, x1, y1, x2, y2
+            ) < threshold:
+                return True
+
+        return False
+
+    # 거리별 후보 위치를 동적으로 생성.
+    # 수직/수평 → 대각선 순으로 시도하여 불필요한 꼬임을 줄임.
+    candidates = []
+
+    for distance in [42, 56, 72, 90, 112, 138, 168]:
+        candidates.extend([
+            (0, distance),
+            (0, -distance),
+            (distance, 0),
+            (-distance, 0),
+            (distance, distance * 0.72),
+            (-distance, distance * 0.72),
+            (distance, -distance * 0.72),
+            (-distance, -distance * 0.72),
+        ])
 
     placed_boxes = []
     placed_segments = []
@@ -169,35 +164,47 @@ def add_smart_scatter_labels(
         for _, row in data.iterrows()
     ]
 
-    # 밀집된 점부터 먼저 배치하면 충돌 회피가 더 안정적
     work = data.copy().reset_index(drop=True)
 
-    density = []
+    # 가장 밀집된 점부터 먼저 처리
+    nearest_distances = []
+
     for i, row in work.iterrows():
         px, py = to_px(row[x_col], row[y_col])
-        nearest = []
+        dists = []
+
         for j, other in work.iterrows():
             if i == j:
                 continue
-            ox, oy = to_px(other[x_col], other[y_col])
-            nearest.append(((px - ox) ** 2 + (py - oy) ** 2) ** 0.5)
-        density.append(min(nearest) if nearest else 9999)
 
-    work["_nearest_distance"] = density
-    work = work.sort_values("_nearest_distance").drop(
-        columns="_nearest_distance"
+            ox, oy = to_px(other[x_col], other[y_col])
+            dists.append(
+                ((px - ox) ** 2 + (py - oy) ** 2) ** 0.5
+            )
+
+        nearest_distances.append(
+            min(dists) if dists else 9999
+        )
+
+    work["_nearest_distance"] = nearest_distances
+    work = (
+        work
+        .sort_values("_nearest_distance")
+        .drop(columns="_nearest_distance")
     )
 
     for _, row in work.iterrows():
         label = str(row[label_col])
         point_x, point_y = to_px(row[x_col], row[y_col])
 
-        # 한글 라벨 폭을 넉넉하게 계산
-        label_w = max(62, len(label) * font_size * 1.28)
-        label_h = font_size * 2.05
+        # 실제보다 넉넉하게 잡아 글자끼리 닿는 것도 방지
+        label_w = max(
+            78,
+            len(label) * font_size * 1.55
+        )
+        label_h = font_size * 2.35
 
-        best = None
-        best_score = float("inf")
+        chosen = None
 
         for ax, ay in candidates:
             label_cx = point_x + ax
@@ -217,69 +224,135 @@ def add_smart_scatter_labels(
                 label_cy,
             )
 
-            # 기본적으로 짧은 선을 선호
-            score = ((ax ** 2 + ay ** 2) ** 0.5) * 0.08
+            # 1. 차트 안쪽에 완전히 들어와야 함
+            if (
+                box[0] < 15
+                or box[2] > plot_w - 15
+                or box[1] < 15
+                or box[3] > plot_h - 15
+            ):
+                continue
 
-            # 차트 밖으로 나가는 후보는 사실상 제외
-            if box[0] < 8:
-                score += 20000 + abs(box[0]) * 30
-            if box[2] > plot_w - 8:
-                score += 20000 + (box[2] - plot_w) * 30
-            if box[1] < 8:
-                score += 20000 + abs(box[1]) * 30
-            if box[3] > plot_h - 8:
-                score += 20000 + (box[3] - plot_h) * 30
+            # 2. 기존 라벨과 겹치면 탈락
+            if any(
+                boxes_overlap(box, prev_box, gap=16)
+                for prev_box in placed_boxes
+            ):
+                continue
 
-            # 기존 라벨과 겹치면 강하게 제외
-            for prev_box in placed_boxes:
-                if boxes_overlap(box, prev_box, gap=10):
-                    score += 50000
+            # 3. 다른 점을 라벨이 덮으면 탈락
+            collision_with_point = False
 
-                # 새 연결선이 기존 라벨을 관통하지 않게 함
-                if segment_hits_box(
-                    point_x,
-                    point_y,
-                    label_cx,
-                    label_cy,
-                    prev_box,
-                ):
-                    score += 30000
-
-            # 새 라벨이 다른 점을 덮지 않게 함
             for other_x, other_y in point_positions:
-                if (
+                same_point = (
                     abs(other_x - point_x) < 1
                     and abs(other_y - point_y) < 1
-                ):
+                )
+
+                if same_point:
                     continue
 
                 if point_in_box(
                     other_x,
                     other_y,
                     box,
-                    pad=point_size + 5,
+                    pad=point_size + 8,
                 ):
-                    score += 30000
+                    collision_with_point = True
+                    break
 
-            # 연결선끼리도 최대한 겹치거나 교차하지 않게 함
-            for prev_segment in placed_segments:
-                if segments_too_close(
-                    segment,
-                    prev_segment,
-                    threshold=8,
-                ):
-                    score += 12000
+            if collision_with_point:
+                continue
 
-            if score < best_score:
-                best_score = score
-                best = (
-                    ax,
-                    ay,
-                    box,
-                    segment,
+            # 4. 새 연결선이 기존 라벨을 통과하면 탈락
+            if any(
+                segment_hits_box(
+                    point_x,
+                    point_y,
+                    label_cx,
+                    label_cy,
+                    prev_box,
+                )
+                for prev_box in placed_boxes
+            ):
+                continue
+
+            # 5. 연결선이 다른 점 근처를 지나가도 탈락
+            line_hits_point = False
+
+            for other_x, other_y in point_positions:
+                same_point = (
+                    abs(other_x - point_x) < 1
+                    and abs(other_y - point_y) < 1
                 )
 
-        ax, ay, box, segment = best
+                if same_point:
+                    continue
+
+                if segment_point_distance(
+                    other_x,
+                    other_y,
+                    *segment,
+                ) < point_size + 9:
+                    line_hits_point = True
+                    break
+
+            if line_hits_point:
+                continue
+
+            # 6. 연결선끼리 겹치거나 교차하면 탈락
+            if any(
+                segments_cross_or_close(
+                    segment,
+                    prev_segment,
+                    threshold=12,
+                )
+                for prev_segment in placed_segments
+            ):
+                continue
+
+            chosen = (
+                ax,
+                ay,
+                box,
+                segment,
+            )
+            break
+
+        # 모든 일반 후보가 막힌 경우:
+        # 우측/좌측 바깥 라벨 레인으로 보내 확실하게 분리
+        if chosen is None:
+            lane_y = 28 + len(placed_boxes) * 46
+            lane_y = min(lane_y, plot_h - 28)
+
+            if point_x < plot_w / 2:
+                label_cx = plot_w - 90
+            else:
+                label_cx = 90
+
+            label_cy = lane_y
+
+            box = (
+                label_cx - label_w / 2,
+                label_cy - label_h / 2,
+                label_cx + label_w / 2,
+                label_cy + label_h / 2,
+            )
+
+            chosen = (
+                label_cx - point_x,
+                label_cy - point_y,
+                box,
+                (
+                    point_x,
+                    point_y,
+                    label_cx,
+                    label_cy,
+                ),
+            )
+
+        ax, ay, box, segment = chosen
+
         placed_boxes.append(box)
         placed_segments.append(segment)
 
@@ -298,15 +371,14 @@ def add_smart_scatter_labels(
                 size=font_size,
                 color="black",
             ),
-            # 완전 불투명 흰색: 그리드/선이 글자를 통과해 보이지 않게 함
             bgcolor="white",
             bordercolor="rgba(0,0,0,0)",
-            borderpad=3,
+            borderpad=4,
         )
 
-    # 첫 화면에서 점과 라벨이 모두 보이도록 넉넉한 범위
-    x_padding = max(x_span * 0.18, 2.0)
-    y_padding = max(y_span * 0.22, 2.0)
+    # 라벨까지 포함해 첫 화면에서 전부 보이게 넉넉한 축 범위
+    x_padding = max(x_span * 0.22, 2.5)
+    y_padding = max(y_span * 0.26, 2.5)
 
     return (
         [x_min - x_padding, x_max + x_padding],
