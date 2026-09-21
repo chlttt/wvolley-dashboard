@@ -58,13 +58,36 @@ st.caption("2025-26 V-League 여자부 팀별 공격 지표")
 with st.sidebar:
     st.header("팀 분석 필터")
 
-    team_options = sorted(
-        routes["팀"].dropna().astype(str).unique().tolist()
-    )
-    selected_team = st.selectbox("팀", team_options)
+    # 1) 시즌 선택
+    season_column = "시즌명" if "시즌명" in routes.columns else "시즌코드"
 
-    team_base = routes[
-        routes["팀"].astype(str) == selected_team
+    season_options = sorted(
+        routes[season_column].dropna().astype(str).unique().tolist(),
+        reverse=True,
+    )
+
+    selected_season = st.selectbox(
+        "시즌",
+        season_options,
+        index=0,
+    )
+
+    season_base = routes[
+        routes[season_column].astype(str) == selected_season
+    ].copy()
+
+    # 2) 선택한 시즌에 실제로 존재하는 팀만 표시
+    team_options = sorted(
+        season_base["팀"].dropna().astype(str).unique().tolist()
+    )
+
+    selected_team = st.selectbox(
+        "팀",
+        team_options,
+    )
+
+    team_base = season_base[
+        season_base["팀"].astype(str) == selected_team
     ].copy()
 
     postseason_competitions = [
@@ -73,8 +96,8 @@ with st.sidebar:
         "챔피언결정전",
     ]
 
-    # 앞으로 모든 분석 페이지에서 이 순서를 기준으로 사용
-    # 포스트시즌 관련 항목은 선택한 팀이 실제로 참가한 경우에만 표시
+    # 3) 경기 구분
+    # 포스트시즌 관련 항목은 선택한 시즌 + 팀이 실제로 참가한 경우에만 표시
     regular_scope_options = [
         "전체",
         "정규리그",
