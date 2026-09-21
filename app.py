@@ -17,6 +17,22 @@ BAR_LABEL_SIZE = 20
 AXIS_TITLE_SIZE = 22
 AXIS_TICK_SIZE = 20
 X_AXIS_TEXT_COLOR = "black"
+CHART_TEXT_COLOR = "black"
+
+# ==========================================
+# 팀 대표 색상
+# 사이트 시각화용으로 일관되게 사용
+# ==========================================
+TEAM_COLORS = {
+    "GS칼텍스": "#00718F",
+    "IBK기업은행": "#0055A4",
+    "정관장": "#C8102E",
+    "페퍼저축은행": "#E61E4D",
+    "한국도로공사": "#005BAC",
+    "현대건설": "#F4B400",
+    "흥국생명": "#D6006D",
+}
+
 
 st.set_page_config(
     page_title="여자배구 데이터 대시보드",
@@ -29,9 +45,11 @@ st.markdown(
     <style>
     /* larger dashboard typography */
     html, body, [class*="css"] {{
+        color: black;
         font-size: {BODY_TEXT_SIZE}px;
     }}
     .stMarkdown, .stCaption, .stMetric, label, p, div {{
+        color: black;
         font-size: {BODY_TEXT_SIZE}px;
     }}
     h1 {{ font-size: {PAGE_TITLE_SIZE}px !important; }}
@@ -184,6 +202,8 @@ fig_team = px.bar(
     team_summary,
     x="팀",
     y="공격성공률_%",
+    color="팀",
+    color_discrete_map=TEAM_COLORS,
     hover_data={
         "공격시도": ":,",
         "공격성공": ":,",
@@ -198,7 +218,7 @@ fig_team = px.bar(
 )
 
 fig_team.update_traces(
-    textfont=dict(size=BAR_LABEL_SIZE),
+    textfont=dict(size=BAR_LABEL_SIZE, color=CHART_TEXT_COLOR),
     text=[
         f"{rate:.1f}%<br>({attempts:,}회)"
         for rate, attempts in zip(
@@ -214,7 +234,8 @@ fig_team.update_layout(
     height=520,
     margin=dict(l=20, r=20, t=70, b=20),
     hovermode="x unified",
-    font=dict(size=BODY_TEXT_SIZE),
+    showlegend=False,
+    font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
     xaxis=dict(
         tickfont=dict(size=TEAM_NAME_SIZE, color=X_AXIS_TEXT_COLOR),
         title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR),
@@ -283,7 +304,7 @@ fig_set = px.bar(
 )
 
 fig_set.update_traces(
-    textfont=dict(size=BAR_LABEL_SIZE),
+    textfont=dict(size=BAR_LABEL_SIZE, color=CHART_TEXT_COLOR),
     text=[
         f"{rate:.1f}%<br>({attempts:,}회)"
         for rate, attempts in zip(
@@ -298,7 +319,7 @@ fig_set.update_traces(
 fig_set.update_layout(
     height=500,
     margin=dict(l=20, r=20, t=70, b=20),
-    font=dict(size=BODY_TEXT_SIZE),
+    font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
     xaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE, color=X_AXIS_TEXT_COLOR), title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR)),
     yaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE, color=X_AXIS_TEXT_COLOR), title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR)),
 )
