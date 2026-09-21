@@ -46,6 +46,163 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+def add_smart_scatter_labels(
+    fig,
+    data,
+    x_col,
+    y_col,
+    label_col,
+    font_size=15,
+    point_size=14,
+):
+    """
+    산점도 라벨을 점 가까이에 배치하되,
+    이미 배치한 라벨/점과의 겹침을 피하도록 후보 위치를 자동 선택합니다.
+    라벨과 점은 연결선으로 이어집니다.
+    """
+
+    if data.empty:
+        return None
+
+    x_min = float(data[x_col].min())
+    x_max = float(data[x_col].max())
+    y_min = float(data[y_col].min())
+    y_max = float(data[y_col].max())
+
+    x_span = max(x_max - x_min, 1.0)
+    y_span = max(y_max - y_min, 1.0)
+
+    # 화면상 대략적인 플롯 영역(px)
+    plot_w = 1050
+    plot_h = 500
+
+    def to_px(x, y):
+        px = (float(x) - x_min) / x_span * plot_w
+        py = (y_max - float(y)) / y_span * plot_h
+        return px, py
+
+    # 짧고 자연스러운 연결선을 우선하고,
+    # 필요할 때만 대각선/조금 먼 위치를 사용
+    candidates = [
+        (0, 34),
+        (0, -34),
+        (42, 0),
+        (-42, 0),
+        (38, 28),
+        (-38, 28),
+        (38, -28),
+        (-38, -28),
+        (0, 52),
+        (0, -52),
+        (58, 0),
+        (-58, 0),
+        (52, 36),
+        (-52, 36),
+        (52, -36),
+        (-52, -36),
+    ]
+
+    placed_boxes = []
+    point_positions = [
+        to_px(row[x_col], row[y_col])
+        for _, row in data.iterrows()
+    ]
+
+    for _, row in data.iterrows():
+        label = str(row[label_col])
+        point_x, point_y = to_px(row[x_col], row[y_col])
+
+        # 한글 글자 수를 고려한 대략적 라벨 박스 크기
+        label_w = max(46, len(label) * font_size * 1.05)
+        label_h = font_size * 1.65
+
+        best = None
+        best_score = float("inf")
+
+        for ax, ay in candidates:
+            label_cx = point_x + ax
+            label_cy = point_y + ay
+
+            box = (
+                label_cx - label_w / 2,
+                label_cy - label_h / 2,
+                label_cx + label_w / 2,
+                label_cy + label_h / 2,
+            )
+
+            score = (ax ** 2 + ay ** 2) ** 0.5 * 0.10
+
+            # 플롯 바깥으로 나가려는 라벨에 큰 페널티
+            if box[0] < 0:
+                score += abs(box[0]) * 8
+            if box[2] > plot_w:
+                score += (box[2] - plot_w) * 8
+            if box[1] < 0:
+                score += abs(box[1]) * 8
+            if box[3] > plot_h:
+                score += (box[3] - plot_h) * 8
+
+            # 기존 라벨 박스와 겹침 검사
+            for prev in placed_boxes:
+                overlap_x = max(
+                    0,
+                    min(box[2], prev[2]) - max(box[0], prev[0])
+                )
+                overlap_y = max(
+                    0,
+                    min(box[3], prev[3]) - max(box[1], prev[1])
+                )
+
+                if overlap_x > 0 and overlap_y > 0:
+                    score += 5000 + overlap_x * overlap_y * 3
+
+            # 다른 점을 라벨이 덮지 않도록 검사
+            for other_x, other_y in point_positions:
+                if abs(other_x - point_x) < 1 and abs(other_y - point_y) < 1:
+                    continue
+
+                if (
+                    box[0] - point_size <= other_x <= box[2] + point_size
+                    and box[1] - point_size <= other_y <= box[3] + point_size
+                ):
+                    score += 2500
+
+            if score < best_score:
+                best_score = score
+                best = (ax, ay, box)
+
+        ax, ay, box = best
+        placed_boxes.append(box)
+
+        fig.add_annotation(
+            x=row[x_col],
+            y=row[y_col],
+            text=label,
+            showarrow=True,
+            arrowhead=0,
+            arrowsize=1,
+            arrowwidth=1,
+            arrowcolor="black",
+            ax=ax,
+            ay=ay,
+            font=dict(
+                size=font_size,
+                color="black",
+            ),
+            bgcolor="rgba(255,255,255,0.90)",
+            borderpad=2,
+        )
+
+    # 라벨 여유 공간까지 포함해 첫 화면에서 전부 보이도록 축 범위 확대
+    x_padding = max(x_span * 0.14, 1.5)
+    y_padding = max(y_span * 0.18, 1.5)
+
+    return (
+        [x_min - x_padding, x_max + x_padding],
+        [y_min - y_padding, y_max + y_padding],
+    )
+
+
 @st.cache_data
 def load_data():
     routes = pd.read_parquet("season_routes_2526.parquet")
@@ -559,76 +716,35 @@ if analysis_level == "선수":
         ),
     )
 
-    if not cross_df.empty:
-        x_min = cross_df[x_col].min()
-        x_max = cross_df[x_col].max()
-        y_min = cross_df[y_col].min()
-        y_max = cross_df[y_col].max()
+    player_ranges = add_smart_scatter_labels(
+        fig=fig_cross,
+        data=cross_df,
+        x_col=x_col,
+        y_col=y_col,
+        label_col="공격수",
+        font_size=15,
+        point_size=14,
+    )
 
-        x_span = max(x_max - x_min, 1)
-        y_span = max(y_max - y_min, 1)
+    player_x_range = None
+    player_y_range = None
 
-        x_padding = max(x_span * 0.18, 2)
-        y_padding = max(y_span * 0.20, 2)
-
-        label_offsets = [
-            (45, -35),
-            (-45, -35),
-            (55, 0),
-            (-55, 0),
-            (45, 35),
-            (-45, 35),
-            (65, -20),
-            (-65, 20),
-        ]
-
-        for i, (_, row) in enumerate(cross_df.reset_index(drop=True).iterrows()):
-            ax_offset, ay_offset = label_offsets[i % len(label_offsets)]
-
-            fig_cross.add_annotation(
-                x=row[x_col],
-                y=row[y_col],
-                text=str(row["공격수"]),
-                showarrow=True,
-                arrowhead=0,
-                arrowsize=1,
-                arrowwidth=1,
-                arrowcolor="black",
-                ax=ax_offset,
-                ay=ay_offset,
-                font=dict(
-                    size=15,
-                    color="black",
-                ),
-                bgcolor="rgba(255,255,255,0.88)",
-                borderpad=2,
-            )
-
-        fig_cross.update_xaxes(
-            range=[
-                x_min - x_padding,
-                x_max + x_padding,
-            ],
-            automargin=True,
-        )
-
-        fig_cross.update_yaxes(
-            range=[
-                y_min - y_padding,
-                y_max + y_padding,
-            ],
-            automargin=True,
-        )
+    if player_ranges is not None:
+        player_x_range, player_y_range = player_ranges
 
     fig_cross.update_layout(
         height=620,
-        margin=dict(l=80, r=110, t=80, b=90),
+        margin=dict(l=90, r=120, t=90, b=100),
         font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
         xaxis=dict(
+            range=player_x_range,
+            automargin=True,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
         yaxis=dict(
+            range=player_y_range,
+            automargin=True,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
@@ -842,22 +958,6 @@ else:
         },
     )
 
-    # 첫 화면에서 모든 팀 점과 이름이 잘리지 않도록
-    # 데이터 범위에 여유 공간을 자동으로 추가
-    x_min = team_compare[x_col].min()
-    x_max = team_compare[x_col].max()
-    y_min = team_compare[y_col].min()
-    y_max = team_compare[y_col].max()
-
-    x_span = max(x_max - x_min, 1)
-    y_span = max(y_max - y_min, 1)
-
-    x_padding = max(x_span * 0.12, 1.5)
-    y_padding = max(y_span * 0.15, 1.5)
-
-    x_mid = (x_min + x_max) / 2
-    y_mid = (y_min + y_max) / 2
-
     for trace in fig_cross.data:
         trace.update(
             marker=dict(
@@ -866,68 +966,35 @@ else:
             ),
         )
 
-    team_label_offsets = [
-        (55, -35),
-        (-55, -35),
-        (65, 0),
-        (-65, 0),
-        (55, 35),
-        (-55, 35),
-        (0, -55),
-    ]
+    team_ranges = add_smart_scatter_labels(
+        fig=fig_cross,
+        data=team_compare,
+        x_col=x_col,
+        y_col=y_col,
+        label_col="팀",
+        font_size=16,
+        point_size=16,
+    )
 
-    for i, (_, row) in enumerate(team_compare.reset_index(drop=True).iterrows()):
-        ax_offset, ay_offset = team_label_offsets[i % len(team_label_offsets)]
+    team_x_range = None
+    team_y_range = None
 
-        # 가장자리 점은 라벨을 차트 안쪽으로 당김
-        if row[x_col] >= x_mid:
-            ax_offset = -abs(ax_offset)
-        else:
-            ax_offset = abs(ax_offset)
-
-        if row[y_col] >= y_mid:
-            ay_offset = abs(ay_offset)
-        else:
-            ay_offset = -abs(ay_offset)
-
-        fig_cross.add_annotation(
-            x=row[x_col],
-            y=row[y_col],
-            text=str(row["팀"]),
-            showarrow=True,
-            arrowhead=0,
-            arrowsize=1,
-            arrowwidth=1,
-            arrowcolor="black",
-            ax=ax_offset,
-            ay=ay_offset,
-            font=dict(
-                size=16,
-                color="black",
-            ),
-            bgcolor="rgba(255,255,255,0.88)",
-            borderpad=2,
-        )
+    if team_ranges is not None:
+        team_x_range, team_y_range = team_ranges
 
     fig_cross.update_layout(
         height=640,
-        margin=dict(l=70, r=100, t=70, b=80),
+        margin=dict(l=90, r=130, t=90, b=100),
         showlegend=False,
         font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
         xaxis=dict(
-            range=[
-                x_min - x_padding,
-                x_max + x_padding,
-            ],
+            range=team_x_range,
             automargin=True,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
         yaxis=dict(
-            range=[
-                y_min - y_padding,
-                y_max + y_padding,
-            ],
+            range=team_y_range,
             automargin=True,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
