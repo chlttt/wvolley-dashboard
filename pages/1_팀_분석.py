@@ -505,6 +505,7 @@ if analysis_level == "선수":
         cross_df,
         x=x_col,
         y=y_col,
+        text="공격수",
         hover_name="공격수",
         hover_data={
             "공격수포지션": True,
@@ -528,11 +529,30 @@ if analysis_level == "선수":
         },
     )
 
+    player_label_positions = [
+        "top center",
+        "bottom center",
+        "middle right",
+        "middle left",
+        "top right",
+        "bottom left",
+        "top left",
+        "bottom right",
+    ]
+
     fig_cross.update_traces(
         marker=dict(
             size=14,
             color=selected_team_color,
             line=dict(width=1, color="black"),
+        ),
+        textposition=[
+            player_label_positions[i % len(player_label_positions)]
+            for i in range(len(cross_df))
+        ],
+        textfont=dict(
+            size=15,
+            color="black",
         ),
     )
 
@@ -553,7 +573,7 @@ if analysis_level == "선수":
     st.plotly_chart(fig_cross, use_container_width=True)
 
     st.caption(
-        "선수 이름은 점에 마우스를 올리면 확인할 수 있습니다. "
+        "점 옆에 선수 이름을 표시하며, 마우스를 올리면 세부 기록을 확인할 수 있습니다. "
         "공격효율 = (공격성공 - 공격범실 - 블로킹당함) ÷ 공격시도."
     )
 
