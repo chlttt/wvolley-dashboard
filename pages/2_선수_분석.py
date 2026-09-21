@@ -222,6 +222,38 @@ def receive_summary(df):
     }
 
 
+def receive_comparison_rows(df):
+    """
+    현재 저장된 receive_events 데이터로 계산 가능한 리시브 비교 행.
+    점수 기반 접전(3점차/후반 3점차/후반 5점차)은
+    receive_events에 당시 점수 필드가 추가되면 자동 확장할 예정입니다.
+    """
+    rows = []
+
+    whole = receive_summary(df)
+    rows.append(
+        {
+            "상황": "전체",
+            "리시브시도": whole["리시브시도"],
+            "리시브정확": whole["리시브정확"],
+            "리시브실패": whole["리시브실패"],
+            "정확리시브율_%": (
+                whole["리시브정확"] / whole["리시브시도"] * 100
+                if whole["리시브시도"]
+                else 0
+            ),
+            "실패율_%": (
+                whole["리시브실패"] / whole["리시브시도"] * 100
+                if whole["리시브시도"]
+                else 0
+            ),
+            "리시브효율_%": whole["리시브효율_%"],
+        }
+    )
+
+    return pd.DataFrame(rows)
+
+
 def build_player_summary(player_rows, team_rows):
     summary = (
         player_rows
@@ -1260,6 +1292,331 @@ if (
             st.caption(
                 "※ 후반 5점차 이내는 현재 저장 데이터에 별도 플래그가 없어 "
                 "다음 데이터 갱신 때 추가할 예정입니다."
+            )
+
+        # ------------------------------
+        # 리시브 비교
+        # ------------------------------
+        receive_compare_base = receives[
+            receives["시즌코드"].astype(str)
+            == str(selected_season_code)
+        ].copy()
+
+        receive_compare_base = apply_receive_scope(
+            receive_compare_base,
+            selected_scope,
+            selected_game_key,
+        )
+
+        player_a_receive = receive_compare_base[
+            (
+                receive_compare_base["팀코드"].astype(str)
+                == str(a_team_code)
+            )
+            & (
+                receive_compare_base["선수"].astype(str)
+                == selected_player_a
+            )
+        ].copy()
+
+        player_b_receive = receive_compare_base[
+            (
+                receive_compare_base["팀코드"].astype(str)
+                == str(b_team_code)
+            )
+            & (
+                receive_compare_base["선수"].astype(str)
+                == selected_player_b
+            )
+        ].copy()
+
+        if (
+            not player_a_receive.empty
+            or not player_b_receive.empty
+        ):
+            st.divider()
+            st.subheader("리시브 비교")
+
+            a_receive_summary = receive_comparison_rows(
+                player_a_receive
+            )
+            b_receive_summary = receive_comparison_rows(
+                player_b_receive
+            )
+
+            receive_compare_df = a_receive_summary.merge(
+                b_receive_summary,
+                on="상황",
+                how="outer",
+                suffixes=("_A", "_B"),
+            ).fillna(0)
+
+            receive_graph_rows = []
+
+            for _, row in receive_compare_df.iterrows():
+                receive_graph_rows.append(
+                    {
+                        "상황": row["상황"],
+                        "선수": selected_player_a,
+                        "리시브효율_%": row["리시브효율_%_A"],
+                        "리시브시도": int(row["리시브시도_A"]),
+                    }
+                )
+                receive_graph_rows.append(
+                    {
+                        "상황": row["상황"],
+                        "선수": selected_player_b,
+                        "리시브효율_%": row["리시브효율_%_B"],
+                        "리시브시도": int(row["리시브시도_B"]),
+                    }
+                )
+
+            receive_graph_df = pd.DataFrame(
+                receive_graph_rows
+            )
+
+            receive_graph_df["표시"] = (
+                receive_graph_df.apply(
+                    lambda row: (
+                        f"{row['리시브효율_%']:.1f}%"
+                        f"<br>({int(row['리시브시도']):,}회)"
+                    ),
+                    axis=1,
+                )
+            )
+
+            fig_receive_compare = px.bar(
+                receive_graph_df,
+                x="상황",
+                y="리시브효율_%",
+                color="선수",
+                text="표시",
+                barmode="group",
+                color_discrete_map={
+                    selected_player_a: a_color,
+                    selected_player_b: b_color,
+                },
+                custom_data=["리시브시도"],
+                labels={
+                    "상황": "",
+                    "리시브효율_%": "리시브 효율 (%)",
+                    "선수": "",
+                    "표시": "",
+                },
+            )
+
+            fig_receive_compare.update_traces(
+                textposition="outside",
+                cliponaxis=False,
+                textfont=dict(
+                    size=BAR_LABEL_SIZE,
+                    color="black",
+                ),
+                hovertemplate=(
+                    "%{x}<br>"
+                    "%{fullData.name}<br>"
+                    "리시브 효율 %{y:.1f}%<br>"
+                    "리시브 시도 %{customdata[0]:,}회"
+                    "<extra></extra>"
+                ),
+            )
+
+            max_receive_rate = (
+                float(
+                    receive_graph_df["리시브효율_%"].max()
+                )
+                if not receive_graph_df.empty
+                else 0
+            )
+
+            fig_receive_compare.update_layout(
+                height=460,
+                margin=dict(
+                    l=60,
+                    r=40,
+                    t=40,
+                    b=70,
+                ),
+                uniformtext_minsize=BAR_LABEL_SIZE,
+                uniformtext_mode="show",
+                font=dict(
+                    size=BODY_TEXT_SIZE,
+                    color="black",
+                ),
+                xaxis=dict(
+                    tickfont=dict(
+                        size=AXIS_TICK_SIZE,
+                        color="black",
+                    ),
+                    showline=True,
+                    linecolor="black",
+                ),
+                yaxis=dict(
+                    range=[
+                        0,
+                        max_receive_rate + 14,
+                    ],
+                    ticksuffix="%",
+                    tickfont=dict(
+                        size=AXIS_TICK_SIZE,
+                        color="black",
+                    ),
+                    title_font=dict(
+                        size=AXIS_TITLE_SIZE,
+                        color="black",
+                    ),
+                    showgrid=True,
+                    gridcolor="rgba(0,0,0,0.12)",
+                    showline=True,
+                    linecolor="black",
+                ),
+                legend=dict(
+                    title_text="",
+                    font=dict(
+                        size=BODY_TEXT_SIZE,
+                        color="black",
+                    ),
+                ),
+            )
+
+            st.plotly_chart(
+                fig_receive_compare,
+                use_container_width=True,
+            )
+
+            st.markdown("### 리시브 상세 비교")
+
+            receive_attempts_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: (
+                        receive_compare_df["리시브시도_A"]
+                        .astype(int)
+                    ),
+                    selected_player_b: (
+                        receive_compare_df["리시브시도_B"]
+                        .astype(int)
+                    ),
+                }
+            )
+
+            receive_exact_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: (
+                        receive_compare_df["정확리시브율_%_A"]
+                        .round(1)
+                    ),
+                    selected_player_b: (
+                        receive_compare_df["정확리시브율_%_B"]
+                        .round(1)
+                    ),
+                }
+            )
+
+            receive_fail_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: (
+                        receive_compare_df["실패율_%_A"]
+                        .round(1)
+                    ),
+                    selected_player_b: (
+                        receive_compare_df["실패율_%_B"]
+                        .round(1)
+                    ),
+                }
+            )
+
+            receive_eff_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: (
+                        receive_compare_df["리시브효율_%_A"]
+                        .round(1)
+                    ),
+                    selected_player_b: (
+                        receive_compare_df["리시브효율_%_B"]
+                        .round(1)
+                    ),
+                }
+            )
+
+            receive_table_height = (
+                58
+                + 54 * len(receive_compare_df)
+                + 8
+            )
+
+            rc1, rc2 = st.columns(2)
+            rc3, rc4 = st.columns(2)
+
+            with rc1:
+                st.markdown("#### 리시브 시도")
+                st.dataframe(
+                    receive_attempts_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                )
+
+            with rc2:
+                st.markdown("#### 정확 리시브율")
+                st.dataframe(
+                    receive_exact_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(
+                            format="%.1f%%"
+                        ),
+                        selected_player_b: st.column_config.NumberColumn(
+                            format="%.1f%%"
+                        ),
+                    },
+                )
+
+            with rc3:
+                st.markdown("#### 리시브 실패율")
+                st.dataframe(
+                    receive_fail_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(
+                            format="%.1f%%"
+                        ),
+                        selected_player_b: st.column_config.NumberColumn(
+                            format="%.1f%%"
+                        ),
+                    },
+                )
+
+            with rc4:
+                st.markdown("#### 리시브 효율")
+                st.dataframe(
+                    receive_eff_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(
+                            format="%.1f%%"
+                        ),
+                        selected_player_b: st.column_config.NumberColumn(
+                            format="%.1f%%"
+                        ),
+                    },
+                )
+
+            st.caption(
+                "현재 저장된 리시브 이벤트에는 당시 점수 정보가 없어 "
+                "리시브 비교는 우선 전체 기준으로 제공합니다. "
+                "다음 데이터 갱신 때 3점차 이내·후반 5점차 이내·"
+                "후반 3점차 이내·접전/듀스/경기결정 세트까지 "
+                "공격 비교와 같은 구조로 확장합니다."
             )
 
 
