@@ -73,8 +73,15 @@ st.caption("2025-26 V-League 여자부 공격 데이터 분석")
 with st.sidebar:
     st.header("필터")
 
+    postseason_competitions = [
+        "준플레이오프",
+        "플레이오프",
+        "챔피언결정전",
+    ]
+
     competition_order = [
         "정규리그",
+        "포스트시즌",
         "준플레이오프",
         "플레이오프",
         "챔피언결정전",
@@ -86,7 +93,7 @@ with st.sidebar:
 
     competition_options = ["전체"] + [
         comp for comp in competition_order
-        if comp in available_competitions
+        if comp == "포스트시즌" or comp in available_competitions
     ]
 
     selected_competition = st.selectbox(
@@ -97,7 +104,11 @@ with st.sidebar:
 
     filtered = df.copy()
 
-    if selected_competition != "전체":
+    if selected_competition == "포스트시즌":
+        filtered = filtered[
+            filtered["대회구분"].astype(str).isin(postseason_competitions)
+        ]
+    elif selected_competition != "전체":
         filtered = filtered[
             filtered["대회구분"].astype(str) == selected_competition
         ]
