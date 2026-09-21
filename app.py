@@ -16,6 +16,7 @@ TEAM_NAME_SIZE = 18
 BAR_LABEL_SIZE = 20
 AXIS_TITLE_SIZE = 22
 AXIS_TICK_SIZE = 20
+X_AXIS_TEXT_COLOR = "black"
 
 st.set_page_config(
     page_title="여자배구 데이터 대시보드",
@@ -204,10 +205,10 @@ fig_team.update_layout(
     hovermode="x unified",
     font=dict(size=BODY_TEXT_SIZE),
     xaxis=dict(
-        tickfont=dict(size=TEAM_NAME_SIZE, color="black"),
-        title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+        tickfont=dict(size=TEAM_NAME_SIZE, color=X_AXIS_TEXT_COLOR),
+        title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR),
     ),
-    yaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE), title_font=dict(size=AXIS_TITLE_SIZE)),
+    yaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE, color=X_AXIS_TEXT_COLOR), title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR)),
 )
 
 fig_team.update_yaxes(
@@ -287,8 +288,8 @@ fig_set.update_layout(
     height=500,
     margin=dict(l=20, r=20, t=70, b=20),
     font=dict(size=BODY_TEXT_SIZE),
-    xaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE), title_font=dict(size=AXIS_TITLE_SIZE)),
-    yaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE), title_font=dict(size=AXIS_TITLE_SIZE)),
+    xaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE, color=X_AXIS_TEXT_COLOR), title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR)),
+    yaxis=dict(tickfont=dict(size=BODY_TEXT_SIZE, color=X_AXIS_TEXT_COLOR), title_font=dict(size=AXIS_TITLE_SIZE, color=X_AXIS_TEXT_COLOR)),
 )
 
 fig_set.update_yaxes(
