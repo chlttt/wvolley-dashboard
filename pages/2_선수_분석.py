@@ -52,37 +52,302 @@ st.markdown(
 )
 
 
-@st.cache_data
-def load_data():
-    routes = pd.read_parquet("season_routes_2526.parquet")
-    games = pd.read_parquet("games_2526_all.parquet")
-
-    for col in ["공격성공", "공격범실", "블로킹당함"]:
-        if col in routes.columns:
-            routes[col] = routes[col].fillna(False).astype(bool)
-
-    return routes, games
-
-
-routes, games = load_data()
-
-st.title("🏐 선수 분석")
-st.caption("2025-26 V-League 여자부 선수별 공격 데이터 분석")
-
-postseason_competitions = [
+POSTSEASON = [
     "준플레이오프",
     "플레이오프",
     "챔피언결정전",
 ]
 
+
+@st.cache_data
+def load_data():
+    routes = pd.read_parquet("season_routes_2526.parquet")
+    games = pd.read_parquet("games_2526_all.parquet")
+    receives = pd.read_parquet("receive_events_2526.parquet")
+
+    for col in ["공격성공", "공격범실", "블로킹당함"]:
+        if col in routes.columns:
+            routes[col] = routes[col].fillna(False).astype(bool)
+
+    for col in [
+        "후반3점차이내",
+        "후반5점차이내",
+        "접전세트",
+        "듀스세트",
+        "경기결정세트",
+    ]:
+        if col in routes.columns:
+            routes[col] = routes[col].fillna(False).astype(bool)
+
+    return routes, games, receives
+
+
+routes, games, receives = load_data()
+
+
+def apply_attack_scope(df, scope, game_key=None):
+    out = df.copy()
+
+    if scope == "정규리그 전체":
+        out = out[out["대회구분"].astype(str) == "정규리그"]
+
+    elif scope == "포스트시즌 전체":
+        out = out[out["대회구분"].astype(str).isin(POSTSEASON)]
+
+    elif scope.endswith("라운드"):
+        out = out[
+            (out["대회구분"].astype(str) == "정규리그")
+            & (out["경기구분"].astype(str) == scope)
+        ]
+
+    elif scope in POSTSEASON:
+        out = out[out["대회구분"].astype(str) == scope]
+
+    elif scope == "개별 경기" and game_key is not None:
+        game_date, competition, game_no = game_key
+        out = out[
+            (out["경기번호"].astype(str) == str(game_no))
+            & (out["대회구분"].astype(str) == str(competition))
+            & (out["경기일"].astype(str).str[:10] == str(game_date))
+        ]
+
+    return out
+
+
+def apply_receive_scope(df, scope, game_key=None):
+    out = df.copy()
+
+    if scope == "정규리그 전체":
+        out = out[out["대회구분"].astype(str) == "정규리그"]
+
+    elif scope == "포스트시즌 전체":
+        out = out[out["대회구분"].astype(str).isin(POSTSEASON)]
+
+    elif scope.endswith("라운드"):
+        round_no = scope.replace("라운드", "")
+        out = out[
+            (out["대회구분"].astype(str) == "정규리그")
+            & (out["라운드"].astype(str) == str(round_no))
+        ]
+
+    elif scope in POSTSEASON:
+        out = out[out["대회구분"].astype(str) == scope]
+
+    elif scope == "개별 경기" and game_key is not None:
+        game_date, competition, game_no = game_key
+        out = out[
+            (out["경기번호"].astype(str) == str(game_no))
+            & (out["대회구분"].astype(str) == str(competition))
+            & (out["경기일"].astype(str).str[:10] == str(game_date))
+        ]
+
+    return out
+
+
+def attack_summary(df):
+    attempts = len(df)
+    successes = int(df["공격성공"].sum()) if attempts else 0
+    errors = int(df["공격범실"].sum()) if attempts else 0
+    blocked = int(df["블로킹당함"].sum()) if attempts else 0
+
+    success_rate = successes / attempts * 100 if attempts else 0
+    efficiency = (
+        (successes - errors - blocked) / attempts * 100
+        if attempts
+        else 0
+    )
+
+    return {
+        "공격시도": attempts,
+        "공격성공": successes,
+        "공격범실": errors,
+        "블로킹당함": blocked,
+        "공격성공률_%": success_rate,
+        "공격효율_%": efficiency,
+    }
+
+
+def receive_summary(df):
+    attempts = len(df)
+
+    if attempts == 0:
+        return {
+            "리시브시도": 0,
+            "리시브정확": 0,
+            "리시브실패": 0,
+            "리시브효율_%": 0.0,
+        }
+
+    exact = int((df["리시브결과"].astype(str) == "exc").sum())
+    failed = int((df["리시브결과"].astype(str) == "fal").sum())
+    efficiency = max(
+        0.0,
+        (exact - failed) / attempts * 100,
+    )
+
+    return {
+        "리시브시도": attempts,
+        "리시브정확": exact,
+        "리시브실패": failed,
+        "리시브효율_%": efficiency,
+    }
+
+
+def build_player_summary(player_rows, team_rows):
+    summary = (
+        player_rows
+        .groupby(
+            [
+                "시즌코드",
+                "팀코드",
+                "팀",
+                "공격수",
+                "공격수포지션",
+            ],
+            dropna=False,
+        )
+        .agg(
+            공격시도=("공격수", "size"),
+            공격성공=("공격성공", "sum"),
+            공격범실=("공격범실", "sum"),
+            블로킹당함=("블로킹당함", "sum"),
+        )
+        .reset_index()
+    )
+
+    if summary.empty:
+        return summary
+
+    summary["공격성공률_%"] = (
+        summary["공격성공"]
+        / summary["공격시도"]
+        * 100
+    )
+
+    summary["공격효율_%"] = (
+        (
+            summary["공격성공"]
+            - summary["공격범실"]
+            - summary["블로킹당함"]
+        )
+        / summary["공격시도"]
+        * 100
+    )
+
+    team_totals = (
+        team_rows
+        .groupby(["팀코드", "팀"], dropna=False)
+        .size()
+        .rename("팀공격시도")
+        .reset_index()
+    )
+
+    summary = summary.merge(
+        team_totals,
+        on=["팀코드", "팀"],
+        how="left",
+    )
+
+    summary["공격점유율_%"] = (
+        summary["공격시도"]
+        / summary["팀공격시도"]
+        * 100
+    )
+
+    return summary
+
+
+def make_rate_bar(df, x_col, title, color):
+    fig = px.bar(
+        df,
+        x=x_col,
+        y="공격성공률_%",
+        hover_data={
+            "공격시도": ":,",
+            "공격성공": ":,",
+            "공격효율_%": ":.1f",
+        },
+        labels={
+            x_col: "",
+            "공격성공률_%": "공격 성공률 (%)",
+            "공격시도": "공격 시도",
+            "공격성공": "공격 성공",
+            "공격효율_%": "공격 효율 (%)",
+        },
+        title=title,
+    )
+
+    fig.update_traces(
+        marker_color=color,
+        text=[
+            f"{rate:.1f}%<br>({attempt:,}회)"
+            for rate, attempt in zip(
+                df["공격성공률_%"],
+                df["공격시도"],
+            )
+        ],
+        textposition="outside",
+        cliponaxis=False,
+        textfont=dict(
+            size=BAR_LABEL_SIZE,
+            color="black",
+        ),
+    )
+
+    max_rate = (
+        float(df["공격성공률_%"].max())
+        if not df.empty
+        else 0
+    )
+
+    fig.update_layout(
+        height=500,
+        margin=dict(l=45, r=30, t=80, b=55),
+        font=dict(
+            size=BODY_TEXT_SIZE,
+            color=CHART_TEXT_COLOR,
+        ),
+        xaxis=dict(
+            tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+            title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+            showline=True,
+            linecolor="black",
+        ),
+        yaxis=dict(
+            range=[0, max_rate + 12],
+            ticksuffix="%",
+            tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+            title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.12)",
+            showline=True,
+            linecolor="black",
+        ),
+    )
+
+    return fig
+
+
+st.title("🏐 선수 분석")
+st.caption("V-League 여자부 선수별 공격·리시브 기록을 상황별로 비교합니다.")
+
+
+# ==========================================
+# 필터
+# ==========================================
+
+season_column = "시즌명" if "시즌명" in routes.columns else "시즌코드"
+
 with st.sidebar:
     st.header("선수 분석 필터")
 
     # 1) 시즌
-    season_column = "시즌명" if "시즌명" in routes.columns else "시즌코드"
-
     season_options = sorted(
-        routes[season_column].dropna().astype(str).unique().tolist(),
+        routes[season_column]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist(),
         reverse=True,
     )
 
@@ -95,6 +360,20 @@ with st.sidebar:
     season_base = routes[
         routes[season_column].astype(str) == selected_season
     ].copy()
+
+    selected_season_codes = (
+        season_base["시즌코드"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    selected_season_code = (
+        selected_season_codes[0]
+        if selected_season_codes
+        else str(selected_season)
+    )
 
     # 2) 팀
     team_options = ["전체 팀"] + sorted(
@@ -129,16 +408,21 @@ with st.sidebar:
         index=0,
     )
 
-    player_base = team_base.copy()
+    position_base = team_base.copy()
 
     if selected_position != "전체 포지션":
-        player_base = player_base[
-            player_base["공격수포지션"].astype(str) == selected_position
+        position_base = position_base[
+            position_base["공격수포지션"].astype(str)
+            == selected_position
         ]
 
     # 4) 선수
     player_options = ["전체 선수"] + sorted(
-        player_base["공격수"].dropna().astype(str).unique().tolist()
+        position_base["공격수"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
     )
 
     selected_player = st.selectbox(
@@ -147,29 +431,39 @@ with st.sidebar:
         index=0,
     )
 
-    # 선수 선택 시 그 선수가 실제 공격 기록을 남긴 범위 기준으로 선택지 구성
-    scope_source = player_base.copy()
+    # 분석 범위 선택지는 선택 선수의 실제 기록 기준
+    scope_source = position_base.copy()
 
     if selected_player != "전체 선수":
         scope_source = scope_source[
-            scope_source["공격수"].astype(str) == selected_player
+            scope_source["공격수"].astype(str)
+            == selected_player
         ]
 
     available_competitions = set(
-        scope_source["대회구분"].dropna().astype(str).unique().tolist()
+        scope_source["대회구분"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    available_rounds = set(
+        scope_source["경기구분"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
     )
 
     # 5) 분석 범위
-    analysis_scope_options = [
+    scope_options = [
         "시즌 전체",
         "정규리그 전체",
     ]
 
-    if any(
-        comp in available_competitions
-        for comp in postseason_competitions
-    ):
-        analysis_scope_options.append("포스트시즌 전체")
+    if any(comp in available_competitions for comp in POSTSEASON):
+        scope_options.append("포스트시즌 전체")
 
     for round_name in [
         "1라운드",
@@ -179,56 +473,34 @@ with st.sidebar:
         "5라운드",
         "6라운드",
     ]:
-        if round_name in set(
-            scope_source["경기구분"].dropna().astype(str).unique().tolist()
-        ):
-            analysis_scope_options.append(round_name)
+        if round_name in available_rounds:
+            scope_options.append(round_name)
 
-    analysis_scope_options += [
-        comp for comp in postseason_competitions
+    scope_options += [
+        comp
+        for comp in POSTSEASON
         if comp in available_competitions
     ]
 
-    analysis_scope_options.append("개별 경기")
+    scope_options.append("개별 경기")
 
     selected_scope = st.selectbox(
         "분석 범위",
-        analysis_scope_options,
+        scope_options,
         index=0,
     )
 
-    filtered = scope_source.copy()
-    selected_game_number = None
+    selected_game_key = None
+    selected_game_label = None
 
-    if selected_scope == "정규리그 전체":
-        filtered = filtered[
-            filtered["대회구분"].astype(str) == "정규리그"
-        ]
-
-    elif selected_scope == "포스트시즌 전체":
-        filtered = filtered[
-            filtered["대회구분"].astype(str).isin(postseason_competitions)
-        ]
-
-    elif selected_scope.endswith("라운드"):
-        filtered = filtered[
-            (filtered["대회구분"].astype(str) == "정규리그")
-            & (filtered["경기구분"].astype(str) == selected_scope)
-        ]
-
-    elif selected_scope in postseason_competitions:
-        filtered = filtered[
-            filtered["대회구분"].astype(str) == selected_scope
-        ]
-
-    elif selected_scope == "개별 경기":
-        game_source = scope_source.copy()
-
+    # 6) 개별 경기
+    if selected_scope == "개별 경기":
         game_pairs = (
-            game_source[
+            scope_source[
                 [
-                    "경기번호",
                     "경기일",
+                    "대회구분",
+                    "경기번호",
                     "팀",
                     "상대팀",
                 ]
@@ -242,19 +514,26 @@ with st.sidebar:
 
         game_label_map = {}
 
-        for _, game_row in game_pairs.iterrows():
-            game_no = str(game_row["경기번호"])
-            game_date = str(game_row["경기일"])[:10]
-            team_name = str(game_row["팀"])
-            opp_name = str(game_row["상대팀"])
+        for _, row in game_pairs.iterrows():
+            game_date = str(row["경기일"])[:10]
+            competition = str(row["대회구분"])
+            game_no = str(row["경기번호"])
+            team_name = str(row["팀"])
+            opponent = str(row["상대팀"])
 
             label = (
                 f"{game_date} | "
-                f"{team_name} vs {opp_name} | "
-                f"경기 {game_no}"
+                f"{team_name} vs {opponent}"
             )
 
-            game_label_map[label] = game_no
+            if competition != "정규리그":
+                label += f" | {competition}"
+
+            game_label_map[label] = (
+                game_date,
+                competition,
+                game_no,
+            )
 
         game_labels = list(game_label_map.keys())
 
@@ -264,217 +543,460 @@ with st.sidebar:
                 game_labels,
                 index=0,
             )
-
-            selected_game_number = game_label_map[
-                selected_game_label
-            ]
-
-            filtered = filtered[
-                filtered["경기번호"].astype(str)
-                == str(selected_game_number)
-            ]
-        else:
-            st.info("선택한 조건에 해당하는 경기 기록이 없습니다.")
-            filtered = filtered.iloc[0:0].copy()
+            selected_game_key = game_label_map[selected_game_label]
 
 
 # ==========================================
-# 공통 선수 집계
+# 현재 범위 데이터
 # ==========================================
 
-player_summary = (
-    filtered
-    .groupby(
-        ["시즌코드", "팀코드", "팀", "공격수", "공격수포지션"],
-        dropna=False,
-    )
-    .agg(
-        공격시도=("공격수", "size"),
-        공격성공=("공격성공", "sum"),
-        공격범실=("공격범실", "sum"),
-        블로킹당함=("블로킹당함", "sum"),
-    )
-    .reset_index()
+# 팀 전체 데이터: 공격점유율의 분모 계산용
+scope_team_rows = apply_attack_scope(
+    team_base,
+    selected_scope,
+    selected_game_key,
 )
 
-player_summary["공격성공률_%"] = (
-    player_summary["공격성공"]
-    / player_summary["공격시도"]
-    * 100
-).round(1)
-
-player_summary["공격효율_%"] = (
-    (
-        player_summary["공격성공"]
-        - player_summary["공격범실"]
-        - player_summary["블로킹당함"]
-    )
-    / player_summary["공격시도"]
-    * 100
-).round(1)
-
-team_totals = (
-    filtered
-    .groupby(["팀코드", "팀"], dropna=False)
-    .size()
-    .rename("팀공격시도")
-    .reset_index()
+# 포지션 필터까지 적용된 비교용 데이터
+scope_player_rows = apply_attack_scope(
+    position_base,
+    selected_scope,
+    selected_game_key,
 )
 
-player_summary = player_summary.merge(
-    team_totals,
-    on=["팀코드", "팀"],
+player_summary = build_player_summary(
+    scope_player_rows,
+    scope_team_rows,
+)
+
+# 리시브 데이터에도 같은 시즌 / 팀 / 범위를 적용
+receive_scope = receives[
+    receives["시즌코드"].astype(str)
+    == str(selected_season_code)
+].copy()
+
+if selected_team != "전체 팀":
+    receive_scope = receive_scope[
+        receive_scope["팀"].astype(str)
+        == selected_team
+    ]
+
+receive_scope = apply_receive_scope(
+    receive_scope,
+    selected_scope,
+    selected_game_key,
+)
+
+# 리시브 이벤트에는 포지션이 없으므로 공격 데이터에서 포지션 매핑
+position_map = (
+    season_base[
+        ["팀", "공격수", "공격수포지션"]
+    ]
+    .dropna(subset=["공격수"])
+    .drop_duplicates(
+        subset=["팀", "공격수"],
+        keep="first",
+    )
+    .rename(
+        columns={
+            "공격수": "선수",
+            "공격수포지션": "포지션",
+        }
+    )
+)
+
+receive_scope = receive_scope.merge(
+    position_map,
+    on=["팀", "선수"],
     how="left",
 )
 
-player_summary["공격점유율_%"] = (
-    player_summary["공격시도"]
-    / player_summary["팀공격시도"]
-    * 100
-).round(1)
+if selected_position != "전체 포지션":
+    receive_scope = receive_scope[
+        receive_scope["포지션"].astype(str)
+        == selected_position
+    ]
 
 
 # ==========================================
-# 개별 선수 화면
+# 개별 선수 상세
 # ==========================================
 
 if selected_player != "전체 선수":
-    player_df = filtered[
-        filtered["공격수"].astype(str) == selected_player
+    player_df = scope_team_rows[
+        scope_team_rows["공격수"].astype(str)
+        == selected_player
     ].copy()
 
-    player_row = (
-        player_summary[
-            player_summary["공격수"].astype(str) == selected_player
-        ]
-        .sort_values("공격시도", ascending=False)
-        .iloc[0]
-    )
+    player_receive_df = receive_scope[
+        receive_scope["선수"].astype(str)
+        == selected_player
+    ].copy()
 
-    st.subheader(f"{selected_player} · {player_row['팀']}")
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    c1.metric(
-        "공격 시도",
-        f"{int(player_row['공격시도']):,}회",
-    )
-    c2.metric(
-        "공격 성공률",
-        f"{player_row['공격성공률_%']:.1f}%",
-    )
-    c3.metric(
-        "공격 효율",
-        f"{player_row['공격효율_%']:.1f}%",
-    )
-    c4.metric(
-        "공격 점유율",
-        f"{player_row['공격점유율_%']:.1f}%",
-    )
-
-    st.divider()
-
-    st.subheader("세트별 공격")
-
-    set_summary = (
-        player_df
-        .groupby("세트")
-        .agg(
-            공격시도=("공격수", "size"),
-            공격성공=("공격성공", "sum"),
-            공격범실=("공격범실", "sum"),
-            블로킹당함=("블로킹당함", "sum"),
+    st.subheader(
+        f"{selected_player}"
+        + (
+            f" · {selected_team}"
+            if selected_team != "전체 팀"
+            else ""
         )
-        .reset_index()
     )
 
-    set_summary["공격성공률_%"] = (
-        set_summary["공격성공"]
-        / set_summary["공격시도"]
-        * 100
-    ).round(1)
+    if selected_game_label:
+        st.markdown(f"**선택 경기:** {selected_game_label}")
 
-    set_summary["공격효율_%"] = (
-        (
-            set_summary["공격성공"]
-            - set_summary["공격범실"]
-            - set_summary["블로킹당함"]
+    if player_df.empty:
+        st.info("선택한 범위에서 이 선수의 공격 기록이 없습니다.")
+
+    else:
+        attack = attack_summary(player_df)
+        receive = receive_summary(player_receive_df)
+
+        player_team = str(player_df["팀"].iloc[0])
+        player_team_code = str(player_df["팀코드"].iloc[0])
+        player_season_code = str(player_df["시즌코드"].iloc[0])
+
+        team_attempts = len(
+            scope_team_rows[
+                scope_team_rows["팀"].astype(str)
+                == player_team
+            ]
         )
-        / set_summary["공격시도"]
-        * 100
-    ).round(1)
 
-    player_color = get_team_color(
-        str(player_row["시즌코드"]),
-        str(player_row["팀코드"]),
-    )
+        attack_share = (
+            attack["공격시도"] / team_attempts * 100
+            if team_attempts
+            else 0
+        )
 
-    fig_set = px.bar(
-        set_summary,
-        x="세트",
-        y="공격성공률_%",
-        hover_data={
-            "공격시도": ":,",
-            "공격효율_%": ":.1f",
-        },
-        labels={
-            "세트": "세트",
-            "공격성공률_%": "공격 성공률 (%)",
-            "공격시도": "공격 시도",
-            "공격효율_%": "공격 효율 (%)",
-        },
-    )
+        c1, c2, c3, c4 = st.columns(4)
 
-    fig_set.update_traces(
-        marker_color=player_color,
-        text=[
-            f"{rate:.1f}%<br>({attempt:,}회)"
-            for rate, attempt in zip(
-                set_summary["공격성공률_%"],
-                set_summary["공격시도"],
+        c1.metric(
+            "공격 시도",
+            f"{attack['공격시도']:,}회",
+        )
+        c2.metric(
+            "공격 성공률",
+            f"{attack['공격성공률_%']:.1f}%",
+        )
+        c3.metric(
+            "공격 효율",
+            f"{attack['공격효율_%']:.1f}%",
+        )
+        c4.metric(
+            "공격 점유율",
+            f"{attack_share:.1f}%",
+        )
+
+        r1, r2, r3 = st.columns(3)
+
+        r1.metric(
+            "리시브 시도",
+            f"{receive['리시브시도']:,}회",
+        )
+        r2.metric(
+            "리시브 정확",
+            f"{receive['리시브정확']:,}회",
+        )
+        r3.metric(
+            "리시브 효율",
+            f"{receive['리시브효율_%']:.1f}%",
+        )
+
+        st.caption(
+            "공격 효율 = (공격 성공 - 공격 범실 - 블로킹 당함) / 공격 시도. "
+            "리시브 효율 = (정확 리시브 - 리시브 실패) / 리시브 시도."
+        )
+
+        player_color = get_team_color(
+            player_season_code,
+            player_team_code,
+        )
+
+        # ------------------------------
+        # 세트별
+        # ------------------------------
+        st.divider()
+        st.subheader("세트별 공격")
+
+        set_summary = (
+            player_df
+            .groupby("세트")
+            .agg(
+                공격시도=("공격수", "size"),
+                공격성공=("공격성공", "sum"),
+                공격범실=("공격범실", "sum"),
+                블로킹당함=("블로킹당함", "sum"),
             )
-        ],
-        textposition="outside",
-        cliponaxis=False,
-        textfont=dict(
-            size=BAR_LABEL_SIZE,
-            color="black",
-        ),
-    )
+            .reset_index()
+        )
 
-    fig_set.update_layout(
-        height=500,
-        margin=dict(l=30, r=30, t=70, b=40),
-        font=dict(
-            size=BODY_TEXT_SIZE,
-            color=CHART_TEXT_COLOR,
-        ),
-        xaxis=dict(
+        set_summary["공격성공률_%"] = (
+            set_summary["공격성공"]
+            / set_summary["공격시도"]
+            * 100
+        )
+
+        set_summary["공격효율_%"] = (
+            (
+                set_summary["공격성공"]
+                - set_summary["공격범실"]
+                - set_summary["블로킹당함"]
+            )
+            / set_summary["공격시도"]
+            * 100
+        )
+
+        fig_set = make_rate_bar(
+            set_summary,
+            "세트",
+            "세트별 공격 성공률",
+            player_color,
+        )
+
+        fig_set.update_xaxes(
             tickmode="linear",
             dtick=1,
-            tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-            title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-        ),
-        yaxis=dict(
-            ticksuffix="%",
-            tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-            title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-        ),
-    )
+        )
 
-    st.plotly_chart(
-        fig_set,
-        use_container_width=True,
-    )
+        st.plotly_chart(
+            fig_set,
+            use_container_width=True,
+        )
 
-    st.divider()
+        # ------------------------------
+        # 점수대별
+        # ------------------------------
+        st.divider()
+        st.subheader("점수대별 공격")
+
+        score_order = [
+            "0점대",
+            "10점대",
+            "20점 이후",
+        ]
+
+        score_summary = (
+            player_df
+            .groupby("점수대")
+            .agg(
+                공격시도=("공격수", "size"),
+                공격성공=("공격성공", "sum"),
+                공격범실=("공격범실", "sum"),
+                블로킹당함=("블로킹당함", "sum"),
+            )
+            .reset_index()
+        )
+
+        score_summary["공격성공률_%"] = (
+            score_summary["공격성공"]
+            / score_summary["공격시도"]
+            * 100
+        )
+
+        score_summary["공격효율_%"] = (
+            (
+                score_summary["공격성공"]
+                - score_summary["공격범실"]
+                - score_summary["블로킹당함"]
+            )
+            / score_summary["공격시도"]
+            * 100
+        )
+
+        score_summary["점수대"] = pd.Categorical(
+            score_summary["점수대"],
+            categories=score_order,
+            ordered=True,
+        )
+
+        score_summary = score_summary.sort_values("점수대")
+
+        fig_score = make_rate_bar(
+            score_summary,
+            "점수대",
+            "점수대별 공격 성공률",
+            player_color,
+        )
+
+        st.plotly_chart(
+            fig_score,
+            use_container_width=True,
+        )
+
+        st.caption(
+            "점수대는 공격하는 팀의 공격 직전 점수를 기준으로 구분합니다."
+        )
+
+        # ------------------------------
+        # 접전 상황
+        # ------------------------------
+        st.divider()
+        st.subheader("접전 상황 공격")
+
+        close_rows = []
+
+        if "후반3점차이내" in player_df.columns:
+            clutch3 = player_df[
+                player_df["후반3점차이내"] == True
+            ]
+            s = attack_summary(clutch3)
+
+            close_rows.append(
+                {
+                    "상황": "후반 3점차 이내",
+                    "공격 시도": s["공격시도"],
+                    "공격 성공": s["공격성공"],
+                    "공격 성공률 (%)": round(
+                        s["공격성공률_%"],
+                        1,
+                    ),
+                    "공격 효율 (%)": round(
+                        s["공격효율_%"],
+                        1,
+                    ),
+                    "전체 공격 중 비중 (%)": round(
+                        s["공격시도"]
+                        / attack["공격시도"]
+                        * 100
+                        if attack["공격시도"]
+                        else 0,
+                        1,
+                    ),
+                }
+            )
+
+        if "후반5점차이내" in player_df.columns:
+            clutch5 = player_df[
+                player_df["후반5점차이내"] == True
+            ]
+            s = attack_summary(clutch5)
+
+            close_rows.append(
+                {
+                    "상황": "후반 5점차 이내",
+                    "공격 시도": s["공격시도"],
+                    "공격 성공": s["공격성공"],
+                    "공격 성공률 (%)": round(
+                        s["공격성공률_%"],
+                        1,
+                    ),
+                    "공격 효율 (%)": round(
+                        s["공격효율_%"],
+                        1,
+                    ),
+                    "전체 공격 중 비중 (%)": round(
+                        s["공격시도"]
+                        / attack["공격시도"]
+                        * 100
+                        if attack["공격시도"]
+                        else 0,
+                        1,
+                    ),
+                }
+            )
+
+        if close_rows:
+            close_df = pd.DataFrame(close_rows)
+            st.dataframe(
+                close_df,
+                use_container_width=True,
+                hide_index=True,
+                height=38 + 35 * len(close_df) + 6,
+            )
+
+            st.caption(
+                "후반 3점차 이내: 1~4세트는 한 팀이라도 20점 이상, "
+                "5세트는 한 팀이라도 10점 이상인 상황에서 점수차가 3점 이내인 공격."
+            )
+
+            if "후반5점차이내" not in player_df.columns:
+                st.caption(
+                    "※ 후반 5점차 이내 지표는 현재 저장된 공격 데이터에 "
+                    "별도 플래그가 없어, 다음 원점수 데이터 갱신 때 추가합니다."
+                )
+
+        # ------------------------------
+        # 세트 상황별
+        # ------------------------------
+        situation_cols = [
+            ("접전세트", "접전 세트"),
+            ("듀스세트", "듀스 세트"),
+            ("경기결정세트", "경기 결정 세트"),
+        ]
+
+        available_situations = [
+            item
+            for item in situation_cols
+            if item[0] in player_df.columns
+        ]
+
+        if available_situations:
+            st.divider()
+            st.subheader("세트 상황별 공격")
+
+            situation_rows = []
+
+            for col, label in available_situations:
+                situation_df = player_df[
+                    player_df[col] == True
+                ]
+                s = attack_summary(situation_df)
+
+                situation_rows.append(
+                    {
+                        "상황": label,
+                        "공격 시도": s["공격시도"],
+                        "공격 성공": s["공격성공"],
+                        "공격 성공률 (%)": round(
+                            s["공격성공률_%"],
+                            1,
+                        ),
+                        "공격 효율 (%)": round(
+                            s["공격효율_%"],
+                            1,
+                        ),
+                    }
+                )
+
+            situation_df = pd.DataFrame(situation_rows)
+
+            st.dataframe(
+                situation_df,
+                use_container_width=True,
+                hide_index=True,
+                height=38 + 35 * len(situation_df) + 6,
+            )
 
 
 # ==========================================
 # TOP 10
 # ==========================================
 
+st.divider()
 st.subheader("선수 TOP 10")
+st.caption(
+    "현재 선택한 시즌·팀·포지션·분석 범위를 기준으로 순위를 계산합니다."
+)
+
+if selected_scope in [
+    "시즌 전체",
+    "정규리그 전체",
+]:
+    default_min_attempts = 100
+elif (
+    selected_scope == "포스트시즌 전체"
+    or selected_scope.endswith("라운드")
+):
+    default_min_attempts = 30
+else:
+    default_min_attempts = 10
+
+max_attempts = (
+    int(player_summary["공격시도"].max())
+    if not player_summary.empty
+    else 1
+)
 
 ranking_type = st.selectbox(
     "순위 기준",
@@ -488,43 +1010,124 @@ ranking_type = st.selectbox(
     key="player_top10_metric",
 )
 
-if selected_scope in ["전체", "정규리그"]:
-    default_min_attempts = 100
-elif selected_scope == "포스트시즌" or selected_scope.endswith("라운드"):
-    default_min_attempts = 30
+if ranking_type in [
+    "공격 성공률",
+    "공격 효율",
+]:
+    min_attack_attempts = st.number_input(
+        "최소 공격 시도",
+        min_value=1,
+        max_value=max(max_attempts, 1),
+        value=min(
+            default_min_attempts,
+            max(max_attempts, 1),
+        ),
+        step=1,
+        key="top10_min_attempts",
+    )
 else:
-    default_min_attempts = 10
+    min_attack_attempts = 1
 
-max_attempts = (
-    int(player_summary["공격시도"].max())
-    if not player_summary.empty
-    else 1
-)
-
-min_attack_attempts = st.number_input(
-    "공격 성공률·효율 순위 최소 공격 시도",
-    min_value=1,
-    max_value=max(max_attempts, 1),
-    value=min(
-        default_min_attempts,
-        max(max_attempts, 1),
-    ),
-    step=1,
-)
 
 if ranking_type == "리시브 시도":
-    st.info(
-        "현재 저장된 season_routes 데이터는 공격 이벤트 중심이라 "
-        "선수의 전체 리시브 시도와 공식 리시브 효율을 정확히 계산할 수 없습니다. "
-        "리시브 전체 이벤트 데이터를 추가하면 이 순위를 연결할 예정입니다."
+    receive_rank = (
+        receive_scope
+        .groupby(
+            ["팀", "선수", "포지션"],
+            dropna=False,
+        )
+        .agg(
+            리시브시도=("리시브결과", "size"),
+            리시브정확=(
+                "리시브결과",
+                lambda x: (
+                    x.astype(str) == "exc"
+                ).sum(),
+            ),
+            리시브실패=(
+                "리시브결과",
+                lambda x: (
+                    x.astype(str) == "fal"
+                ).sum(),
+            ),
+        )
+        .reset_index()
     )
+
+    if not receive_rank.empty:
+        receive_rank["리시브효율_%"] = (
+            (
+                receive_rank["리시브정확"]
+                - receive_rank["리시브실패"]
+            )
+            / receive_rank["리시브시도"]
+            * 100
+        ).clip(lower=0)
+
+        receive_rank = (
+            receive_rank
+            .sort_values(
+                ["리시브시도", "리시브효율_%"],
+                ascending=[False, False],
+            )
+            .head(10)
+            .reset_index(drop=True)
+        )
+
+        receive_rank.index = receive_rank.index + 1
+        receive_rank.index.name = "순위"
+
+        receive_table = receive_rank[
+            [
+                "선수",
+                "팀",
+                "포지션",
+                "리시브시도",
+                "리시브정확",
+                "리시브실패",
+                "리시브효율_%",
+            ]
+        ].copy()
+
+        receive_table.columns = [
+            "선수",
+            "팀",
+            "포지션",
+            "리시브 시도",
+            "리시브 정확",
+            "리시브 실패",
+            "리시브 효율 (%)",
+        ]
+
+        receive_table["리시브 효율 (%)"] = (
+            receive_table["리시브 효율 (%)"]
+            .round(1)
+        )
+
+        top10_height = (
+            44
+            + 35 * len(receive_table)
+            + 6
+        )
+
+        st.dataframe(
+            receive_table,
+            use_container_width=True,
+            height=top10_height,
+        )
+    else:
+        st.info("선택한 범위에 리시브 기록이 없습니다.")
 
 else:
     ranking_df = player_summary.copy()
 
-    if ranking_type in ["공격 성공률", "공격 효율"]:
+    if ranking_type in [
+        "공격 성공률",
+        "공격 효율",
+    ]:
         ranking_df = ranking_df[
-            ranking_df["공격시도"] >= min_attack_attempts
+            ranking_df["공격시도"]
+            >= min_attack_attempts
         ].copy()
 
     sort_col = {
@@ -545,8 +1148,9 @@ else:
     )
 
     ranking_df.index = ranking_df.index + 1
+    ranking_df.index.name = "순위"
 
-    table_df = ranking_df[
+    attack_table = ranking_df[
         [
             "공격수",
             "팀",
@@ -558,7 +1162,7 @@ else:
         ]
     ].copy()
 
-    table_df.columns = [
+    attack_table.columns = [
         "선수",
         "팀",
         "포지션",
@@ -568,36 +1172,42 @@ else:
         "공격 점유율 (%)",
     ]
 
-    # TOP 10 전체가 내부 스크롤 없이 한 번에 보이도록 높이 고정
-    top10_row_height = 35
-    top10_header_height = 38
+    for col in [
+        "공격 성공률 (%)",
+        "공격 효율 (%)",
+        "공격 점유율 (%)",
+    ]:
+        attack_table[col] = attack_table[col].round(1)
+
     top10_height = (
-        top10_header_height
-        + top10_row_height * len(table_df)
+        44
+        + 35 * len(attack_table)
         + 6
     )
 
     st.dataframe(
-        table_df,
+        attack_table,
         use_container_width=True,
         height=top10_height,
     )
 
-    if ranking_type in ["공격 성공률", "공격 효율"]:
+    if ranking_type in [
+        "공격 성공률",
+        "공격 효율",
+    ]:
         st.caption(
-            f"현재 최소 공격 시도 {min_attack_attempts:,}회 이상 선수만 포함합니다."
+            f"최소 공격 시도 {min_attack_attempts:,}회 이상 선수만 포함합니다."
         )
 
 
 # ==========================================
-# 전체 선수 교차분석
+# 전체 선수 교차 분석
 # ==========================================
 
 st.divider()
-
 st.subheader("선수 교차 분석")
 st.caption(
-    "전체 팀 또는 특정 팀, 포지션을 선택한 상태에서 선수들을 비교할 수 있습니다."
+    "공격 점유율은 각 선수의 공격 시도를 해당 팀의 전체 공격 시도로 나눈 값입니다."
 )
 
 cross_metric = st.selectbox(
@@ -623,7 +1233,8 @@ cross_min_attempts = st.number_input(
 )
 
 cross_df = player_summary[
-    player_summary["공격시도"] >= cross_min_attempts
+    player_summary["공격시도"]
+    >= cross_min_attempts
 ].copy()
 
 cross_metric_map = {
@@ -643,87 +1254,97 @@ cross_metric_map = {
 
 x_col, y_col = cross_metric_map[cross_metric]
 
-cross_df["팀색상"] = cross_df.apply(
-    lambda row: get_team_color(
-        row["시즌코드"],
-        row["팀코드"],
-    ),
-    axis=1,
-)
+if cross_df.empty:
+    st.info("선택한 조건에 해당하는 선수가 없습니다.")
 
-color_map = dict(
-    zip(
-        cross_df["팀"],
-        cross_df["팀색상"],
+else:
+    cross_df["팀색상"] = cross_df.apply(
+        lambda row: get_team_color(
+            str(row["시즌코드"]),
+            str(row["팀코드"]),
+        ),
+        axis=1,
     )
-)
 
-fig_cross = px.scatter(
-    cross_df,
-    x=x_col,
-    y=y_col,
-    color="팀",
-    color_discrete_map=color_map,
-    hover_name="공격수",
-    hover_data={
-        "팀": True,
-        "공격수포지션": True,
-        "공격시도": ":,",
-        "공격점유율_%": ":.1f",
-        "공격성공률_%": ":.1f",
-        "공격효율_%": ":.1f",
-    },
-    labels={
-        "공격점유율_%": "공격 점유율 (%)",
-        "공격성공률_%": "공격 성공률 (%)",
-        "공격효율_%": "공격 효율 (%)",
-        "공격수포지션": "포지션",
-        "공격시도": "공격 시도",
-    },
-)
+    color_map = dict(
+        zip(
+            cross_df["팀"],
+            cross_df["팀색상"],
+        )
+    )
 
-fig_cross.update_traces(
-    marker=dict(
-        size=14,
-        line=dict(
-            width=1,
+    fig_cross = px.scatter(
+        cross_df,
+        x=x_col,
+        y=y_col,
+        color="팀",
+        color_discrete_map=color_map,
+        hover_name="공격수",
+        hover_data={
+            "팀": True,
+            "공격수포지션": True,
+            "공격시도": ":,",
+            "공격점유율_%": ":.1f",
+            "공격성공률_%": ":.1f",
+            "공격효율_%": ":.1f",
+        },
+        labels={
+            "공격점유율_%": "공격 점유율 (%)",
+            "공격성공률_%": "공격 성공률 (%)",
+            "공격효율_%": "공격 효율 (%)",
+            "공격수포지션": "포지션",
+            "공격시도": "공격 시도",
+        },
+    )
+
+    fig_cross.update_traces(
+        marker=dict(
+            size=14,
+            line=dict(
+                width=1,
+                color="black",
+            ),
+        )
+    )
+
+    fig_cross.update_layout(
+        height=650,
+        margin=dict(l=80, r=80, t=50, b=90),
+        font=dict(
+            size=BODY_TEXT_SIZE,
             color="black",
         ),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.12)",
+            showline=True,
+            linecolor="black",
+            tickfont=dict(
+                size=AXIS_TICK_SIZE,
+                color="black",
+            ),
+            title_font=dict(
+                size=AXIS_TITLE_SIZE,
+                color="black",
+            ),
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.12)",
+            showline=True,
+            linecolor="black",
+            tickfont=dict(
+                size=AXIS_TICK_SIZE,
+                color="black",
+            ),
+            title_font=dict(
+                size=AXIS_TITLE_SIZE,
+                color="black",
+            ),
+        ),
     )
-)
 
-fig_cross.update_layout(
-    height=640,
-    margin=dict(l=80, r=80, t=50, b=90),
-    font=dict(
-        size=BODY_TEXT_SIZE,
-        color="black",
-    ),
-    xaxis=dict(
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.12)",
-        showline=True,
-        linecolor="black",
-        tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-        title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-    ),
-    yaxis=dict(
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.12)",
-        showline=True,
-        linecolor="black",
-        tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-        title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-    ),
-)
-
-st.plotly_chart(
-    fig_cross,
-    use_container_width=True,
-)
-
-st.caption(
-    "현재는 전체 선수 비교에서는 hover로 선수 이름을 확인합니다. "
-    "팀 분석의 소수 선수 산점도와 달리 선수 수가 많아질 수 있어 "
-    "라벨이 과밀해지는 것을 막기 위한 구성입니다."
-)
+    st.plotly_chart(
+        fig_cross,
+        use_container_width=True,
+    )
