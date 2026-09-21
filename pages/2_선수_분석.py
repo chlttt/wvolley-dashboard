@@ -496,10 +496,19 @@ else:
         "공격 점유율 (%)",
     ]
 
+    # TOP 10 전체가 내부 스크롤 없이 한 번에 보이도록 높이 고정
+    top10_row_height = 35
+    top10_header_height = 38
+    top10_height = (
+        top10_header_height
+        + top10_row_height * len(table_df)
+        + 6
+    )
+
     st.dataframe(
         table_df,
         use_container_width=True,
-        height=430,
+        height=top10_height,
     )
 
     if ranking_type in ["공격 성공률", "공격 효율"]:
