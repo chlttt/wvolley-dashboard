@@ -829,7 +829,7 @@ if analysis_level == "선수":
         x_col=x_col,
         y_col=y_col,
         label_col="공격수",
-        font_size=15,
+        font_size=18,
         point_size=14,
     )
 
