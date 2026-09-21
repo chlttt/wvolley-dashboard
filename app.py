@@ -6,13 +6,13 @@ import streamlit as st
 # 글씨 크기 설정
 # 숫자만 바꾸면 해당 글씨 크기가 변경됩니다.
 # ==========================================
-PAGE_TITLE_SIZE = 55
+PAGE_TITLE_SIZE = 52
 SECTION_TITLE_SIZE = 40
 SUBSECTION_TITLE_SIZE = 32
 BODY_TEXT_SIZE = 20
 METRIC_VALUE_SIZE = 46
 METRIC_LABEL_SIZE = 22
-TEAM_NAME_SIZE = 16
+TEAM_NAME_SIZE = 20
 BAR_LABEL_SIZE = 20
 AXIS_TITLE_SIZE = 22
 AXIS_TICK_SIZE = 20
