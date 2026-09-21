@@ -55,15 +55,16 @@ st.markdown(
 @st.cache_data
 def load_data():
     routes = pd.read_parquet("season_routes_2526.parquet")
+    games = pd.read_parquet("games_2526_all.parquet")
 
     for col in ["공격성공", "공격범실", "블로킹당함"]:
         if col in routes.columns:
             routes[col] = routes[col].fillna(False).astype(bool)
 
-    return routes
+    return routes, games
 
 
-routes = load_data()
+routes, games = load_data()
 
 st.title("🏐 선수 분석")
 st.caption("2025-26 V-League 여자부 선수별 공격 데이터 분석")
@@ -95,68 +96,9 @@ with st.sidebar:
         routes[season_column].astype(str) == selected_season
     ].copy()
 
-    # 2) 경기 구분
-    available_competitions = set(
-        season_base["대회구분"].dropna().astype(str).unique().tolist()
-    )
-
-    game_scope_options = [
-        "전체",
-        "정규리그",
-    ]
-
-    if any(
-        comp in available_competitions
-        for comp in postseason_competitions
-    ):
-        game_scope_options.append("포스트시즌")
-
-    game_scope_options += [
-        "1라운드",
-        "2라운드",
-        "3라운드",
-        "4라운드",
-        "5라운드",
-        "6라운드",
-    ]
-
-    game_scope_options += [
-        comp for comp in postseason_competitions
-        if comp in available_competitions
-    ]
-
-    selected_scope = st.selectbox(
-        "경기 구분",
-        game_scope_options,
-        index=0,
-    )
-
-    scope_base = season_base.copy()
-
-    if selected_scope == "정규리그":
-        scope_base = scope_base[
-            scope_base["대회구분"].astype(str) == "정규리그"
-        ]
-
-    elif selected_scope == "포스트시즌":
-        scope_base = scope_base[
-            scope_base["대회구분"].astype(str).isin(postseason_competitions)
-        ]
-
-    elif selected_scope.endswith("라운드"):
-        scope_base = scope_base[
-            (scope_base["대회구분"].astype(str) == "정규리그")
-            & (scope_base["경기구분"].astype(str) == selected_scope)
-        ]
-
-    elif selected_scope in postseason_competitions:
-        scope_base = scope_base[
-            scope_base["대회구분"].astype(str) == selected_scope
-        ]
-
-    # 3) 팀
+    # 2) 팀
     team_options = ["전체 팀"] + sorted(
-        scope_base["팀"].dropna().astype(str).unique().tolist()
+        season_base["팀"].dropna().astype(str).unique().tolist()
     )
 
     selected_team = st.selectbox(
@@ -165,14 +107,14 @@ with st.sidebar:
         index=0,
     )
 
-    team_base = scope_base.copy()
+    team_base = season_base.copy()
 
     if selected_team != "전체 팀":
         team_base = team_base[
             team_base["팀"].astype(str) == selected_team
         ]
 
-    # 4) 포지션
+    # 3) 포지션
     position_options = ["전체 포지션"] + sorted(
         team_base["공격수포지션"]
         .dropna()
@@ -187,16 +129,16 @@ with st.sidebar:
         index=0,
     )
 
-    filtered = team_base.copy()
+    player_base = team_base.copy()
 
     if selected_position != "전체 포지션":
-        filtered = filtered[
-            filtered["공격수포지션"].astype(str) == selected_position
+        player_base = player_base[
+            player_base["공격수포지션"].astype(str) == selected_position
         ]
 
-    # 5) 선수
+    # 4) 선수
     player_options = ["전체 선수"] + sorted(
-        filtered["공격수"].dropna().astype(str).unique().tolist()
+        player_base["공격수"].dropna().astype(str).unique().tolist()
     )
 
     selected_player = st.selectbox(
@@ -204,6 +146,136 @@ with st.sidebar:
         player_options,
         index=0,
     )
+
+    # 선수 선택 시 그 선수가 실제 공격 기록을 남긴 범위 기준으로 선택지 구성
+    scope_source = player_base.copy()
+
+    if selected_player != "전체 선수":
+        scope_source = scope_source[
+            scope_source["공격수"].astype(str) == selected_player
+        ]
+
+    available_competitions = set(
+        scope_source["대회구분"].dropna().astype(str).unique().tolist()
+    )
+
+    # 5) 분석 범위
+    analysis_scope_options = [
+        "시즌 전체",
+        "정규리그 전체",
+    ]
+
+    if any(
+        comp in available_competitions
+        for comp in postseason_competitions
+    ):
+        analysis_scope_options.append("포스트시즌 전체")
+
+    for round_name in [
+        "1라운드",
+        "2라운드",
+        "3라운드",
+        "4라운드",
+        "5라운드",
+        "6라운드",
+    ]:
+        if round_name in set(
+            scope_source["경기구분"].dropna().astype(str).unique().tolist()
+        ):
+            analysis_scope_options.append(round_name)
+
+    analysis_scope_options += [
+        comp for comp in postseason_competitions
+        if comp in available_competitions
+    ]
+
+    analysis_scope_options.append("개별 경기")
+
+    selected_scope = st.selectbox(
+        "분석 범위",
+        analysis_scope_options,
+        index=0,
+    )
+
+    filtered = scope_source.copy()
+    selected_game_number = None
+
+    if selected_scope == "정규리그 전체":
+        filtered = filtered[
+            filtered["대회구분"].astype(str) == "정규리그"
+        ]
+
+    elif selected_scope == "포스트시즌 전체":
+        filtered = filtered[
+            filtered["대회구분"].astype(str).isin(postseason_competitions)
+        ]
+
+    elif selected_scope.endswith("라운드"):
+        filtered = filtered[
+            (filtered["대회구분"].astype(str) == "정규리그")
+            & (filtered["경기구분"].astype(str) == selected_scope)
+        ]
+
+    elif selected_scope in postseason_competitions:
+        filtered = filtered[
+            filtered["대회구분"].astype(str) == selected_scope
+        ]
+
+    elif selected_scope == "개별 경기":
+        game_source = scope_source.copy()
+
+        game_pairs = (
+            game_source[
+                [
+                    "경기번호",
+                    "경기일",
+                    "팀",
+                    "상대팀",
+                ]
+            ]
+            .drop_duplicates()
+            .sort_values(
+                ["경기일", "경기번호"],
+                ascending=[False, False],
+            )
+        )
+
+        game_label_map = {}
+
+        for _, game_row in game_pairs.iterrows():
+            game_no = str(game_row["경기번호"])
+            game_date = str(game_row["경기일"])[:10]
+            team_name = str(game_row["팀"])
+            opp_name = str(game_row["상대팀"])
+
+            label = (
+                f"{game_date} | "
+                f"{team_name} vs {opp_name} | "
+                f"경기 {game_no}"
+            )
+
+            game_label_map[label] = game_no
+
+        game_labels = list(game_label_map.keys())
+
+        if game_labels:
+            selected_game_label = st.selectbox(
+                "경기 선택",
+                game_labels,
+                index=0,
+            )
+
+            selected_game_number = game_label_map[
+                selected_game_label
+            ]
+
+            filtered = filtered[
+                filtered["경기번호"].astype(str)
+                == str(selected_game_number)
+            ]
+        else:
+            st.info("선택한 조건에 해당하는 경기 기록이 없습니다.")
+            filtered = filtered.iloc[0:0].copy()
 
 
 # ==========================================
