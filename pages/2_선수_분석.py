@@ -1493,53 +1493,260 @@ if selected_player != "전체 선수":
             )
 
 
-# ==========================================
-# TOP 10
-# ==========================================
+if analysis_mode == "개별 선수":
+    # ==========================================
+    # TOP 10
+    # ==========================================
 
-st.divider()
-st.subheader("선수 TOP 10")
-st.caption(
-    "현재 선택한 시즌·팀·포지션·분석 범위를 기준으로 순위를 계산합니다."
-)
+    st.divider()
+    st.subheader("선수 TOP 10")
+    st.caption(
+        "현재 선택한 시즌·팀·포지션·분석 범위를 기준으로 순위를 계산합니다."
+    )
 
-if selected_scope in [
-    "시즌 전체",
-    "정규리그 전체",
-]:
-    default_min_attempts = 100
-elif (
-    selected_scope == "포스트시즌 전체"
-    or selected_scope.endswith("라운드")
-):
-    default_min_attempts = 30
-else:
-    default_min_attempts = 10
+    if selected_scope in [
+        "시즌 전체",
+        "정규리그 전체",
+    ]:
+        default_min_attempts = 100
+    elif (
+        selected_scope == "포스트시즌 전체"
+        or selected_scope.endswith("라운드")
+    ):
+        default_min_attempts = 30
+    else:
+        default_min_attempts = 10
 
-max_attempts = (
-    int(player_summary["공격시도"].max())
-    if not player_summary.empty
-    else 1
-)
+    max_attempts = (
+        int(player_summary["공격시도"].max())
+        if not player_summary.empty
+        else 1
+    )
 
-ranking_type = st.selectbox(
-    "순위 기준",
-    [
+    ranking_type = st.selectbox(
+        "순위 기준",
+        [
+            "공격 성공률",
+            "공격 효율",
+            "공격 시도",
+            "공격 점유율",
+            "리시브 시도",
+        ],
+        key="player_top10_metric",
+    )
+
+    if ranking_type in [
         "공격 성공률",
         "공격 효율",
-        "공격 시도",
-        "공격 점유율",
-        "리시브 시도",
-    ],
-    key="player_top10_metric",
-)
+    ]:
+        min_attack_attempts = st.number_input(
+            "최소 공격 시도",
+            min_value=1,
+            max_value=max(max_attempts, 1),
+            value=min(
+                default_min_attempts,
+                max(max_attempts, 1),
+            ),
+            step=1,
+            key="top10_min_attempts",
+        )
+    else:
+        min_attack_attempts = 1
 
-if ranking_type in [
-    "공격 성공률",
-    "공격 효율",
-]:
-    min_attack_attempts = st.number_input(
-        "최소 공격 시도",
+
+    if ranking_type == "리시브 시도":
+        receive_rank = (
+            receive_scope
+            .groupby(
+                ["팀", "선수", "포지션"],
+                dropna=False,
+            )
+            .agg(
+                리시브시도=("리시브결과", "size"),
+                리시브정확=(
+                    "리시브결과",
+                    lambda x: (
+                        x.astype(str) == "exc"
+                    ).sum(),
+                ),
+                리시브실패=(
+                    "리시브결과",
+                    lambda x: (
+                        x.astype(str) == "fal"
+                    ).sum(),
+                ),
+            )
+            .reset_index()
+        )
+
+        if not receive_rank.empty:
+            receive_rank["리시브효율_%"] = (
+                (
+                    receive_rank["리시브정확"]
+                    - receive_rank["리시브실패"]
+                )
+                / receive_rank["리시브시도"]
+                * 100
+            ).clip(lower=0)
+
+            receive_rank = (
+                receive_rank
+                .sort_values(
+                    ["리시브시도", "리시브효율_%"],
+                    ascending=[False, False],
+                )
+                .head(10)
+                .reset_index(drop=True)
+            )
+
+            receive_rank.index = receive_rank.index + 1
+            receive_rank.index.name = "순위"
+
+            receive_table = receive_rank[
+                [
+                    "선수",
+                    "팀",
+                    "포지션",
+                    "리시브시도",
+                    "리시브정확",
+                    "리시브실패",
+                    "리시브효율_%",
+                ]
+            ].copy()
+
+            receive_table.columns = [
+                "선수",
+                "팀",
+                "포지션",
+                "리시브 시도",
+                "리시브 정확",
+                "리시브 실패",
+                "리시브 효율 (%)",
+            ]
+
+            receive_table["리시브 효율 (%)"] = (
+                receive_table["리시브 효율 (%)"]
+                .round(1)
+            )
+
+            top10_height = (
+                44
+                + 35 * len(receive_table)
+                + 6
+            )
+
+            st.dataframe(
+                receive_table,
+                use_container_width=True,
+                height=top10_height,
+            )
+        else:
+            st.info("선택한 범위에 리시브 기록이 없습니다.")
+
+    else:
+        ranking_df = player_summary.copy()
+
+        if ranking_type in [
+            "공격 성공률",
+            "공격 효율",
+        ]:
+            ranking_df = ranking_df[
+                ranking_df["공격시도"]
+                >= min_attack_attempts
+            ].copy()
+
+        sort_col = {
+            "공격 성공률": "공격성공률_%",
+            "공격 효율": "공격효율_%",
+            "공격 시도": "공격시도",
+            "공격 점유율": "공격점유율_%",
+        }[ranking_type]
+
+        ranking_df = (
+            ranking_df
+            .sort_values(
+                [sort_col, "공격시도"],
+                ascending=[False, False],
+            )
+            .head(10)
+            .reset_index(drop=True)
+        )
+
+        ranking_df.index = ranking_df.index + 1
+        ranking_df.index.name = "순위"
+
+        attack_table = ranking_df[
+            [
+                "공격수",
+                "팀",
+                "공격수포지션",
+                "공격시도",
+                "공격성공률_%",
+                "공격효율_%",
+                "공격점유율_%",
+            ]
+        ].copy()
+
+        attack_table.columns = [
+            "선수",
+            "팀",
+            "포지션",
+            "공격 시도",
+            "공격 성공률 (%)",
+            "공격 효율 (%)",
+            "공격 점유율 (%)",
+        ]
+
+        for col in [
+            "공격 성공률 (%)",
+            "공격 효율 (%)",
+            "공격 점유율 (%)",
+        ]:
+            attack_table[col] = attack_table[col].round(1)
+
+        top10_height = (
+            44
+            + 35 * len(attack_table)
+            + 6
+        )
+
+        st.dataframe(
+            attack_table,
+            use_container_width=True,
+            height=top10_height,
+        )
+
+        if ranking_type in [
+            "공격 성공률",
+            "공격 효율",
+        ]:
+            st.caption(
+                f"최소 공격 시도 {min_attack_attempts:,}회 이상 선수만 포함합니다."
+            )
+
+
+    # ==========================================
+    # 전체 선수 교차 분석
+    # ==========================================
+
+    st.divider()
+    st.subheader("선수 교차 분석")
+    st.caption(
+        "공격 점유율은 각 선수의 공격 시도를 해당 팀의 전체 공격 시도로 나눈 값입니다."
+    )
+
+    cross_metric = st.selectbox(
+        "지표 조합",
+        [
+            "공격점유율 × 공격효율",
+            "공격점유율 × 공격성공률",
+            "공격성공률 × 공격효율",
+        ],
+        key="player_league_cross_metric",
+    )
+
+    cross_min_attempts = st.number_input(
+        "교차 분석 최소 공격 시도",
         min_value=1,
         max_value=max(max_attempts, 1),
         value=min(
@@ -1547,328 +1754,122 @@ if ranking_type in [
             max(max_attempts, 1),
         ),
         step=1,
-        key="top10_min_attempts",
-    )
-else:
-    min_attack_attempts = 1
-
-
-if ranking_type == "리시브 시도":
-    receive_rank = (
-        receive_scope
-        .groupby(
-            ["팀", "선수", "포지션"],
-            dropna=False,
-        )
-        .agg(
-            리시브시도=("리시브결과", "size"),
-            리시브정확=(
-                "리시브결과",
-                lambda x: (
-                    x.astype(str) == "exc"
-                ).sum(),
-            ),
-            리시브실패=(
-                "리시브결과",
-                lambda x: (
-                    x.astype(str) == "fal"
-                ).sum(),
-            ),
-        )
-        .reset_index()
+        key="player_league_cross_min_attempts",
     )
 
-    if not receive_rank.empty:
-        receive_rank["리시브효율_%"] = (
-            (
-                receive_rank["리시브정확"]
-                - receive_rank["리시브실패"]
-            )
-            / receive_rank["리시브시도"]
-            * 100
-        ).clip(lower=0)
-
-        receive_rank = (
-            receive_rank
-            .sort_values(
-                ["리시브시도", "리시브효율_%"],
-                ascending=[False, False],
-            )
-            .head(10)
-            .reset_index(drop=True)
-        )
-
-        receive_rank.index = receive_rank.index + 1
-        receive_rank.index.name = "순위"
-
-        receive_table = receive_rank[
-            [
-                "선수",
-                "팀",
-                "포지션",
-                "리시브시도",
-                "리시브정확",
-                "리시브실패",
-                "리시브효율_%",
-            ]
-        ].copy()
-
-        receive_table.columns = [
-            "선수",
-            "팀",
-            "포지션",
-            "리시브 시도",
-            "리시브 정확",
-            "리시브 실패",
-            "리시브 효율 (%)",
-        ]
-
-        receive_table["리시브 효율 (%)"] = (
-            receive_table["리시브 효율 (%)"]
-            .round(1)
-        )
-
-        top10_height = (
-            44
-            + 35 * len(receive_table)
-            + 6
-        )
-
-        st.dataframe(
-            receive_table,
-            use_container_width=True,
-            height=top10_height,
-        )
-    else:
-        st.info("선택한 범위에 리시브 기록이 없습니다.")
-
-else:
-    ranking_df = player_summary.copy()
-
-    if ranking_type in [
-        "공격 성공률",
-        "공격 효율",
-    ]:
-        ranking_df = ranking_df[
-            ranking_df["공격시도"]
-            >= min_attack_attempts
-        ].copy()
-
-    sort_col = {
-        "공격 성공률": "공격성공률_%",
-        "공격 효율": "공격효율_%",
-        "공격 시도": "공격시도",
-        "공격 점유율": "공격점유율_%",
-    }[ranking_type]
-
-    ranking_df = (
-        ranking_df
-        .sort_values(
-            [sort_col, "공격시도"],
-            ascending=[False, False],
-        )
-        .head(10)
-        .reset_index(drop=True)
-    )
-
-    ranking_df.index = ranking_df.index + 1
-    ranking_df.index.name = "순위"
-
-    attack_table = ranking_df[
-        [
-            "공격수",
-            "팀",
-            "공격수포지션",
-            "공격시도",
-            "공격성공률_%",
-            "공격효율_%",
-            "공격점유율_%",
-        ]
+    cross_df = player_summary[
+        player_summary["공격시도"]
+        >= cross_min_attempts
     ].copy()
 
-    attack_table.columns = [
-        "선수",
-        "팀",
-        "포지션",
-        "공격 시도",
-        "공격 성공률 (%)",
-        "공격 효율 (%)",
-        "공격 점유율 (%)",
-    ]
+    cross_metric_map = {
+        "공격점유율 × 공격효율": (
+            "공격점유율_%",
+            "공격효율_%",
+        ),
+        "공격점유율 × 공격성공률": (
+            "공격점유율_%",
+            "공격성공률_%",
+        ),
+        "공격성공률 × 공격효율": (
+            "공격성공률_%",
+            "공격효율_%",
+        ),
+    }
 
-    for col in [
-        "공격 성공률 (%)",
-        "공격 효율 (%)",
-        "공격 점유율 (%)",
-    ]:
-        attack_table[col] = attack_table[col].round(1)
+    x_col, y_col = cross_metric_map[cross_metric]
 
-    top10_height = (
-        44
-        + 35 * len(attack_table)
-        + 6
-    )
+    if cross_df.empty:
+        st.info("선택한 조건에 해당하는 선수가 없습니다.")
 
-    st.dataframe(
-        attack_table,
-        use_container_width=True,
-        height=top10_height,
-    )
-
-    if ranking_type in [
-        "공격 성공률",
-        "공격 효율",
-    ]:
-        st.caption(
-            f"최소 공격 시도 {min_attack_attempts:,}회 이상 선수만 포함합니다."
+    else:
+        cross_df["팀색상"] = cross_df.apply(
+            lambda row: get_team_color(
+                str(row["시즌코드"]),
+                str(row["팀코드"]),
+            ),
+            axis=1,
         )
 
-
-# ==========================================
-# 전체 선수 교차 분석
-# ==========================================
-
-st.divider()
-st.subheader("선수 교차 분석")
-st.caption(
-    "공격 점유율은 각 선수의 공격 시도를 해당 팀의 전체 공격 시도로 나눈 값입니다."
-)
-
-cross_metric = st.selectbox(
-    "지표 조합",
-    [
-        "공격점유율 × 공격효율",
-        "공격점유율 × 공격성공률",
-        "공격성공률 × 공격효율",
-    ],
-    key="player_league_cross_metric",
-)
-
-cross_min_attempts = st.number_input(
-    "교차 분석 최소 공격 시도",
-    min_value=1,
-    max_value=max(max_attempts, 1),
-    value=min(
-        default_min_attempts,
-        max(max_attempts, 1),
-    ),
-    step=1,
-    key="player_league_cross_min_attempts",
-)
-
-cross_df = player_summary[
-    player_summary["공격시도"]
-    >= cross_min_attempts
-].copy()
-
-cross_metric_map = {
-    "공격점유율 × 공격효율": (
-        "공격점유율_%",
-        "공격효율_%",
-    ),
-    "공격점유율 × 공격성공률": (
-        "공격점유율_%",
-        "공격성공률_%",
-    ),
-    "공격성공률 × 공격효율": (
-        "공격성공률_%",
-        "공격효율_%",
-    ),
-}
-
-x_col, y_col = cross_metric_map[cross_metric]
-
-if cross_df.empty:
-    st.info("선택한 조건에 해당하는 선수가 없습니다.")
-
-else:
-    cross_df["팀색상"] = cross_df.apply(
-        lambda row: get_team_color(
-            str(row["시즌코드"]),
-            str(row["팀코드"]),
-        ),
-        axis=1,
-    )
-
-    color_map = dict(
-        zip(
-            cross_df["팀"],
-            cross_df["팀색상"],
+        color_map = dict(
+            zip(
+                cross_df["팀"],
+                cross_df["팀색상"],
+            )
         )
-    )
 
-    fig_cross = px.scatter(
-        cross_df,
-        x=x_col,
-        y=y_col,
-        color="팀",
-        color_discrete_map=color_map,
-        hover_name="공격수",
-        hover_data={
-            "팀": True,
-            "공격수포지션": True,
-            "공격시도": ":,",
-            "공격점유율_%": ":.1f",
-            "공격성공률_%": ":.1f",
-            "공격효율_%": ":.1f",
-        },
-        labels={
-            "공격점유율_%": "공격 점유율 (%)",
-            "공격성공률_%": "공격 성공률 (%)",
-            "공격효율_%": "공격 효율 (%)",
-            "공격수포지션": "포지션",
-            "공격시도": "공격 시도",
-        },
-    )
+        fig_cross = px.scatter(
+            cross_df,
+            x=x_col,
+            y=y_col,
+            color="팀",
+            color_discrete_map=color_map,
+            hover_name="공격수",
+            hover_data={
+                "팀": True,
+                "공격수포지션": True,
+                "공격시도": ":,",
+                "공격점유율_%": ":.1f",
+                "공격성공률_%": ":.1f",
+                "공격효율_%": ":.1f",
+            },
+            labels={
+                "공격점유율_%": "공격 점유율 (%)",
+                "공격성공률_%": "공격 성공률 (%)",
+                "공격효율_%": "공격 효율 (%)",
+                "공격수포지션": "포지션",
+                "공격시도": "공격 시도",
+            },
+        )
 
-    fig_cross.update_traces(
-        marker=dict(
-            size=14,
-            line=dict(
-                width=1,
+        fig_cross.update_traces(
+            marker=dict(
+                size=14,
+                line=dict(
+                    width=1,
+                    color="black",
+                ),
+            )
+        )
+
+        fig_cross.update_layout(
+            height=650,
+            margin=dict(l=80, r=80, t=50, b=90),
+            font=dict(
+                size=BODY_TEXT_SIZE,
                 color="black",
+            ),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.12)",
+                showline=True,
+                linecolor="black",
+                tickfont=dict(
+                    size=AXIS_TICK_SIZE,
+                    color="black",
+                ),
+                title_font=dict(
+                    size=AXIS_TITLE_SIZE,
+                    color="black",
+                ),
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.12)",
+                showline=True,
+                linecolor="black",
+                tickfont=dict(
+                    size=AXIS_TICK_SIZE,
+                    color="black",
+                ),
+                title_font=dict(
+                    size=AXIS_TITLE_SIZE,
+                    color="black",
+                ),
             ),
         )
-    )
 
-    fig_cross.update_layout(
-        height=650,
-        margin=dict(l=80, r=80, t=50, b=90),
-        font=dict(
-            size=BODY_TEXT_SIZE,
-            color="black",
-        ),
-        xaxis=dict(
-            showgrid=True,
-            gridcolor="rgba(0,0,0,0.12)",
-            showline=True,
-            linecolor="black",
-            tickfont=dict(
-                size=AXIS_TICK_SIZE,
-                color="black",
-            ),
-            title_font=dict(
-                size=AXIS_TITLE_SIZE,
-                color="black",
-            ),
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor="rgba(0,0,0,0.12)",
-            showline=True,
-            linecolor="black",
-            tickfont=dict(
-                size=AXIS_TICK_SIZE,
-                color="black",
-            ),
-            title_font=dict(
-                size=AXIS_TITLE_SIZE,
-                color="black",
-            ),
-        ),
-    )
-
-    st.plotly_chart(
-        fig_cross,
-        use_container_width=True,
-    )
+        st.plotly_chart(
+            fig_cross,
+            use_container_width=True,
+        )
