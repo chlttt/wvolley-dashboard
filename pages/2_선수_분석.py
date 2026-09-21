@@ -167,6 +167,35 @@ def attack_summary(df):
     }
 
 
+def plain_three_point_mask(df):
+    """
+    공격 직전 점수 기준의 '그냥 3점차 이내' 마스크.
+    후반 조건은 붙이지 않습니다.
+    저장 데이터에 이미 계산된 플래그/점수차가 있을 때만 사용합니다.
+    """
+    for col in [
+        "3점차이내",
+        "점수차3점이내",
+        "공격직전3점차이내",
+    ]:
+        if col in df.columns:
+            return df[col].fillna(False).astype(bool)
+
+    for col in [
+        "점수차",
+        "공격직전점수차",
+        "공격시점점수차",
+    ]:
+        if col in df.columns:
+            numeric = pd.to_numeric(
+                df[col],
+                errors="coerce",
+            )
+            return numeric.abs() <= 3
+
+    return None
+
+
 def receive_summary(df):
     attempts = len(df)
 
@@ -803,6 +832,21 @@ if (
                 }
             )
 
+            plain3_mask = plain_three_point_mask(player_df)
+
+            if plain3_mask is not None:
+                s_plain3 = attack_summary(
+                    player_df[plain3_mask]
+                )
+                rows.append(
+                    {
+                        "상황": "3점차 이내",
+                        "공격시도": s_plain3["공격시도"],
+                        "공격성공률_%": s_plain3["공격성공률_%"],
+                        "공격효율_%": s_plain3["공격효율_%"],
+                    }
+                )
+
             if "후반5점차이내" in player_df.columns:
                 s5 = attack_summary(
                     player_df[
@@ -867,6 +911,7 @@ if (
 
         situation_order = [
             "전체",
+            "3점차 이내",
             "후반 5점차 이내",
             "후반 3점차 이내",
             "접전 세트",
@@ -924,7 +969,8 @@ if (
         )
 
         st.caption(
-            "접전 기준은 공격 직전 점수를 기준으로 계산합니다."
+            "접전 기준은 공격 직전 점수를 기준으로 계산합니다. "
+            "'3점차 이내'는 세트 진행 시점과 관계없이 점수차만 적용합니다."
         )
 
         st.markdown("### 상황별 공격 성공률 비교")
@@ -1376,6 +1422,36 @@ if (
 
         close_rows = []
 
+        plain3_mask = plain_three_point_mask(player_df)
+
+        if plain3_mask is not None:
+            close3 = player_df[plain3_mask]
+            s = attack_summary(close3)
+
+            close_rows.append(
+                {
+                    "상황": "3점차 이내",
+                    "공격 시도": s["공격시도"],
+                    "공격 성공": s["공격성공"],
+                    "공격 성공률 (%)": round(
+                        s["공격성공률_%"],
+                        1,
+                    ),
+                    "공격 효율 (%)": round(
+                        s["공격효율_%"],
+                        1,
+                    ),
+                    "전체 공격 중 비중 (%)": round(
+                        s["공격시도"]
+                        / attack["공격시도"]
+                        * 100
+                        if attack["공격시도"]
+                        else 0,
+                        1,
+                    ),
+                }
+            )
+
         if "후반3점차이내" in player_df.columns:
             clutch3 = player_df[
                 player_df["후반3점차이내"] == True
@@ -1446,8 +1522,9 @@ if (
             )
 
             st.caption(
-                "후반 3점차 이내: 공격 직전 점수 기준으로 1~4세트는 한 팀이라도 "
-                "20점 이상, 5세트는 한 팀이라도 10점 이상이며 점수차가 3점 이내인 공격."
+                "3점차 이내는 공격 직전 점수 기준으로 세트 진행 시점과 관계없이 "
+                "점수차가 3점 이내인 공격입니다. 후반 3점차 이내는 1~4세트는 한 팀이라도 "
+                "20점 이상, 5세트는 한 팀이라도 10점 이상인 후반 상황까지 함께 적용합니다."
             )
 
             if "후반5점차이내" not in player_df.columns:
