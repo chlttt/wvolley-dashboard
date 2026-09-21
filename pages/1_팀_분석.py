@@ -441,3 +441,363 @@ st.plotly_chart(fig_player, use_container_width=True)
 st.caption(
     "공격 점유율은 선택한 조건에서 해당 선수가 기록한 공격 시도 비중입니다."
 )
+
+st.divider()
+
+st.subheader("교차 분석")
+
+analysis_level = st.selectbox(
+    "비교 대상",
+    ["선수", "팀"],
+    key="cross_analysis_level",
+)
+
+if analysis_level == "선수":
+    metric_option = st.selectbox(
+        "지표 조합",
+        [
+            "공격점유율 × 공격효율",
+            "공격점유율 × 공격성공률",
+            "공격성공률 × 공격효율",
+        ],
+        key="player_cross_metric",
+    )
+
+    cross_df = (
+        team_df
+        .groupby(["공격수", "공격수포지션"], dropna=False)
+        .agg(
+            공격시도=("공격수", "size"),
+            공격성공=("공격성공", "sum"),
+            공격범실=("공격범실", "sum"),
+            블로킹당함=("블로킹당함", "sum"),
+        )
+        .reset_index()
+    )
+
+    cross_df["공격점유율_%"] = (
+        cross_df["공격시도"] / cross_df["공격시도"].sum() * 100
+    ).round(1)
+
+    cross_df["공격성공률_%"] = (
+        cross_df["공격성공"] / cross_df["공격시도"] * 100
+    ).round(1)
+
+    cross_df["공격효율_%"] = (
+        (
+            cross_df["공격성공"]
+            - cross_df["공격범실"]
+            - cross_df["블로킹당함"]
+        )
+        / cross_df["공격시도"]
+        * 100
+    ).round(1)
+
+    metric_map = {
+        "공격점유율 × 공격효율": ("공격점유율_%", "공격효율_%"),
+        "공격점유율 × 공격성공률": ("공격점유율_%", "공격성공률_%"),
+        "공격성공률 × 공격효율": ("공격성공률_%", "공격효율_%"),
+    }
+
+    x_col, y_col = metric_map[metric_option]
+
+    fig_cross = px.scatter(
+        cross_df,
+        x=x_col,
+        y=y_col,
+        hover_name="공격수",
+        hover_data={
+            "공격수포지션": True,
+            "공격시도": ":,",
+            "공격성공": ":,",
+            "공격범실": ":,",
+            "블로킹당함": ":,",
+            "공격점유율_%": ":.1f",
+            "공격성공률_%": ":.1f",
+            "공격효율_%": ":.1f",
+        },
+        labels={
+            "공격점유율_%": "공격 점유율 (%)",
+            "공격성공률_%": "공격 성공률 (%)",
+            "공격효율_%": "공격 효율 (%)",
+            "공격수포지션": "포지션",
+            "공격시도": "공격 시도",
+            "공격성공": "공격 성공",
+            "공격범실": "공격 범실",
+            "블로킹당함": "블로킹 당함",
+        },
+    )
+
+    fig_cross.update_traces(
+        marker=dict(
+            size=14,
+            color=selected_team_color,
+            line=dict(width=1, color="black"),
+        ),
+    )
+
+    fig_cross.update_layout(
+        height=560,
+        margin=dict(l=20, r=20, t=30, b=20),
+        font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
+        xaxis=dict(
+            tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
+            title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
+        ),
+        yaxis=dict(
+            tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
+            title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
+        ),
+    )
+
+    st.plotly_chart(fig_cross, use_container_width=True)
+
+    st.caption(
+        "선수 이름은 점에 마우스를 올리면 확인할 수 있습니다. "
+        "공격효율 = (공격성공 - 공격범실 - 블로킹당함) ÷ 공격시도."
+    )
+
+else:
+    metric_option = st.selectbox(
+        "지표 조합",
+        [
+            "공격성공률 × 공격효율",
+            "TOP1 공격집중도 × 팀 공격효율",
+            "TOP3 공격집중도 × 팀 공격효율",
+            "클러치 공격비중 × 클러치 성공률",
+        ],
+        key="team_cross_metric",
+    )
+
+    # 선택된 시즌과 경기 구분을 모든 팀에 동일하게 적용
+    compare_base = season_base.copy()
+
+    if selected_scope == "정규리그":
+        compare_base = compare_base[
+            compare_base["대회구분"].astype(str) == "정규리그"
+        ]
+
+    elif selected_scope == "포스트시즌":
+        compare_base = compare_base[
+            compare_base["대회구분"].astype(str).isin(postseason_competitions)
+        ]
+
+    elif selected_scope in [
+        "1라운드",
+        "2라운드",
+        "3라운드",
+        "4라운드",
+        "5라운드",
+        "6라운드",
+    ]:
+        compare_base = compare_base[
+            (compare_base["대회구분"].astype(str) == "정규리그")
+            & (compare_base["경기구분"].astype(str) == selected_scope)
+        ]
+
+    elif selected_scope in postseason_competitions:
+        compare_base = compare_base[
+            compare_base["대회구분"].astype(str) == selected_scope
+        ]
+
+    team_compare = (
+        compare_base
+        .groupby(
+            ["시즌코드", "팀코드", "팀"],
+            dropna=False
+        )
+        .agg(
+            공격시도=("공격수", "size"),
+            공격성공=("공격성공", "sum"),
+            공격범실=("공격범실", "sum"),
+            블로킹당함=("블로킹당함", "sum"),
+        )
+        .reset_index()
+    )
+
+    team_compare["공격성공률_%"] = (
+        team_compare["공격성공"] / team_compare["공격시도"] * 100
+    ).round(1)
+
+    team_compare["공격효율_%"] = (
+        (
+            team_compare["공격성공"]
+            - team_compare["공격범실"]
+            - team_compare["블로킹당함"]
+        )
+        / team_compare["공격시도"]
+        * 100
+    ).round(1)
+
+    # 팀별 선수 공격 점유율 → TOP1/TOP3 집중도
+    player_share = (
+        compare_base
+        .groupby(["팀코드", "팀", "공격수"], dropna=False)
+        .size()
+        .reset_index(name="공격시도")
+    )
+
+    team_total = (
+        player_share
+        .groupby(["팀코드", "팀"])["공격시도"]
+        .sum()
+        .rename("팀공격시도")
+        .reset_index()
+    )
+
+    player_share = player_share.merge(
+        team_total,
+        on=["팀코드", "팀"],
+        how="left",
+    )
+
+    player_share["공격점유율_%"] = (
+        player_share["공격시도"] / player_share["팀공격시도"] * 100
+    )
+
+    concentration_rows = []
+
+    for (team_code, team_name), group in player_share.groupby(["팀코드", "팀"]):
+        shares = group["공격점유율_%"].sort_values(ascending=False).tolist()
+
+        concentration_rows.append({
+            "팀코드": team_code,
+            "팀": team_name,
+            "TOP1집중도_%": round(sum(shares[:1]), 1),
+            "TOP3집중도_%": round(sum(shares[:3]), 1),
+        })
+
+    concentration_df = pd.DataFrame(concentration_rows)
+
+    team_compare = team_compare.merge(
+        concentration_df,
+        on=["팀코드", "팀"],
+        how="left",
+    )
+
+    clutch_base = compare_base[
+        compare_base["후반3점차이내"] == True
+    ].copy()
+
+    clutch_summary = (
+        clutch_base
+        .groupby(["팀코드", "팀"], dropna=False)
+        .agg(
+            클러치공격시도=("공격수", "size"),
+            클러치공격성공=("공격성공", "sum"),
+        )
+        .reset_index()
+    )
+
+    clutch_summary["클러치성공률_%"] = (
+        clutch_summary["클러치공격성공"]
+        / clutch_summary["클러치공격시도"]
+        * 100
+    ).round(1)
+
+    team_compare = team_compare.merge(
+        clutch_summary,
+        on=["팀코드", "팀"],
+        how="left",
+    )
+
+    team_compare["클러치공격비중_%"] = (
+        team_compare["클러치공격시도"].fillna(0)
+        / team_compare["공격시도"]
+        * 100
+    ).round(1)
+
+    metric_map = {
+        "공격성공률 × 공격효율": ("공격성공률_%", "공격효율_%"),
+        "TOP1 공격집중도 × 팀 공격효율": ("TOP1집중도_%", "공격효율_%"),
+        "TOP3 공격집중도 × 팀 공격효율": ("TOP3집중도_%", "공격효율_%"),
+        "클러치 공격비중 × 클러치 성공률": ("클러치공격비중_%", "클러치성공률_%"),
+    }
+
+    x_col, y_col = metric_map[metric_option]
+
+    team_compare["팀색상"] = team_compare.apply(
+        lambda row: get_team_color(
+            row["시즌코드"],
+            row["팀코드"]
+        ),
+        axis=1,
+    )
+
+    color_map = dict(
+        zip(
+            team_compare["팀"],
+            team_compare["팀색상"]
+        )
+    )
+
+    fig_cross = px.scatter(
+        team_compare,
+        x=x_col,
+        y=y_col,
+        color="팀",
+        color_discrete_map=color_map,
+        text="팀",
+        hover_name="팀",
+        hover_data={
+            "공격시도": ":,",
+            "공격성공률_%": ":.1f",
+            "공격효율_%": ":.1f",
+            "TOP1집중도_%": ":.1f",
+            "TOP3집중도_%": ":.1f",
+            "클러치공격비중_%": ":.1f",
+            "클러치성공률_%": ":.1f",
+        },
+        labels={
+            "공격성공률_%": "공격 성공률 (%)",
+            "공격효율_%": "공격 효율 (%)",
+            "TOP1집중도_%": "TOP1 공격 집중도 (%)",
+            "TOP3집중도_%": "TOP3 공격 집중도 (%)",
+            "클러치공격비중_%": "클러치 공격 비중 (%)",
+            "클러치성공률_%": "클러치 공격 성공률 (%)",
+            "공격시도": "공격 시도",
+        },
+    )
+
+    label_positions = [
+        "top center",
+        "bottom center",
+        "middle right",
+        "middle left",
+        "top right",
+        "bottom left",
+        "top left",
+    ]
+
+    for i, trace in enumerate(fig_cross.data):
+        trace.update(
+            marker=dict(
+                size=16,
+                line=dict(width=1, color="black"),
+            ),
+            textposition=label_positions[i % len(label_positions)],
+            textfont=dict(size=16, color="black"),
+        )
+
+    fig_cross.update_layout(
+        height=600,
+        margin=dict(l=30, r=30, t=50, b=30),
+        showlegend=False,
+        font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
+        xaxis=dict(
+            tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
+            title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
+        ),
+        yaxis=dict(
+            tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
+            title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
+        ),
+    )
+
+    st.plotly_chart(fig_cross, use_container_width=True)
+
+    st.caption(
+        "팀 비교는 현재 선택한 시즌과 경기 구분을 모든 팀에 동일하게 적용합니다. "
+        "포스트시즌 세부 구분을 선택하면 해당 경기에 참가한 팀만 표시됩니다."
+    )
+
