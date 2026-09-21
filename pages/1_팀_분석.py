@@ -779,36 +779,79 @@ else:
         },
     )
 
-    label_positions = [
-        "top center",
-        "bottom center",
-        "middle right",
-        "middle left",
-        "top right",
-        "bottom left",
-        "top left",
-    ]
+    # 첫 화면에서 모든 팀 점과 이름이 잘리지 않도록
+    # 데이터 범위에 여유 공간을 자동으로 추가
+    x_min = team_compare[x_col].min()
+    x_max = team_compare[x_col].max()
+    y_min = team_compare[y_col].min()
+    y_max = team_compare[y_col].max()
 
-    for i, trace in enumerate(fig_cross.data):
+    x_span = max(x_max - x_min, 1)
+    y_span = max(y_max - y_min, 1)
+
+    x_padding = max(x_span * 0.12, 1.5)
+    y_padding = max(y_span * 0.15, 1.5)
+
+    x_mid = (x_min + x_max) / 2
+    y_mid = (y_min + y_max) / 2
+
+    # 가장자리 팀 이름은 차트 안쪽을 향하도록 배치
+    position_by_team = {}
+
+    for _, row in team_compare.iterrows():
+        x_value = row[x_col]
+        y_value = row[y_col]
+
+        if x_value >= x_mid and y_value >= y_mid:
+            position = "top left"
+        elif x_value >= x_mid and y_value < y_mid:
+            position = "bottom left"
+        elif x_value < x_mid and y_value >= y_mid:
+            position = "top right"
+        else:
+            position = "bottom right"
+
+        position_by_team[row["팀"]] = position
+
+    for trace in fig_cross.data:
+        team_name = trace.name
+
         trace.update(
             marker=dict(
                 size=16,
                 line=dict(width=1, color="black"),
             ),
-            textposition=label_positions[i % len(label_positions)],
-            textfont=dict(size=16, color="black"),
+            textposition=position_by_team.get(
+                team_name,
+                "top center"
+            ),
+            textfont=dict(
+                size=16,
+                color="black",
+            ),
+            cliponaxis=False,
         )
 
     fig_cross.update_layout(
-        height=600,
-        margin=dict(l=30, r=30, t=50, b=30),
+        height=640,
+        margin=dict(l=70, r=100, t=70, b=80),
         showlegend=False,
         font=dict(size=BODY_TEXT_SIZE, color=CHART_TEXT_COLOR),
         xaxis=dict(
+            range=[
+                x_min - x_padding,
+                x_max + x_padding,
+            ],
+            automargin=True,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
         yaxis=dict(
+            range=[
+                y_min - y_padding,
+                y_max + y_padding,
+            ],
+            automargin=True,
             tickfont=dict(size=AXIS_TICK_SIZE, color=CHART_TEXT_COLOR),
             title_font=dict(size=AXIS_TITLE_SIZE, color=CHART_TEXT_COLOR),
         ),
