@@ -63,7 +63,7 @@ POSTSEASON = [
 def load_data():
     routes = pd.read_parquet("season_routes_2526.parquet")
     games = pd.read_parquet("games_2526_all.parquet")
-    receives = pd.read_parquet("receive_events_2526.parquet")
+    receives = pd.read_parquet("receive_events_2526_final.parquet")
     set_summary = pd.read_parquet("set_summary_2526.parquet")
 
     for col in ["공격성공", "공격범실", "블로킹당함"]:
@@ -79,6 +79,19 @@ def load_data():
     ]:
         if col in routes.columns:
             routes[col] = routes[col].fillna(False).astype(bool)
+
+    for col in [
+        "3점차이내",
+        "5점차이내",
+        "후반상황",
+        "후반3점차이내",
+        "후반5점차이내",
+        "접전세트",
+        "듀스세트",
+        "경기결정세트",
+    ]:
+        if col in receives.columns:
+            receives[col] = receives[col].fillna(False).astype(bool)
 
     return routes, games, receives, set_summary
 
@@ -230,13 +243,18 @@ def enrich_receive_set_tags(receive_df, set_df):
     """
     out = receive_df.copy()
 
+    required_tags = [
+        "접전세트",
+        "듀스세트",
+        "경기결정세트",
+    ]
+
+    if all(col in out.columns for col in required_tags):
+        return out
+
     tag_cols = [
         col
-        for col in [
-            "접전세트",
-            "듀스세트",
-            "경기결정세트",
-        ]
+        for col in required_tags
         if col in set_df.columns
     ]
 
@@ -275,12 +293,7 @@ def enrich_receive_set_tags(receive_df, set_df):
 
 
 def receive_comparison_rows(df):
-    """
-    리시브 상황별 비교.
-    현재 데이터로 가능한 전체/접전세트/듀스세트/경기결정세트를 계산합니다.
-    점수 기반 3점차/후반 3점차/후반 5점차는 리시브 이벤트에
-    당시 점수 필드를 추가한 뒤 같은 위치에 확장합니다.
-    """
+    """리시브 상황별 비교: 공격 비교와 같은 7개 상황을 사용합니다."""
     rows = []
 
     def append_row(label, subset):
@@ -308,15 +321,15 @@ def receive_comparison_rows(df):
     append_row("전체", df)
 
     for col, label in [
+        ("3점차이내", "3점차 이내"),
+        ("후반5점차이내", "후반 5점차 이내"),
+        ("후반3점차이내", "후반 3점차 이내"),
         ("접전세트", "접전 세트"),
         ("듀스세트", "듀스 세트"),
         ("경기결정세트", "경기 결정 세트"),
     ]:
         if col in df.columns:
-            append_row(
-                label,
-                df[df[col] == True],
-            )
+            append_row(label, df[df[col] == True])
 
     order = [
         "전체",
@@ -336,15 +349,10 @@ def receive_comparison_rows(df):
             categories=order,
             ordered=True,
         )
-        result = (
-            result
-            .sort_values("상황")
-            .reset_index(drop=True)
-        )
+        result = result.sort_values("상황").reset_index(drop=True)
         result["상황"] = result["상황"].astype(str)
 
     return result
-
 
 def build_player_summary(player_rows, team_rows):
     summary = (
@@ -575,12 +583,33 @@ with st.sidebar:
         )
 
         # 4) 포지션
-        position_options = ["전체 포지션"] + sorted(
+        receive_position_pool = receives[
+            receives["시즌코드"].astype(str)
+            == str(selected_season_code)
+        ].copy()
+
+        if selected_team != "전체 팀":
+            receive_position_pool = receive_position_pool[
+                receive_position_pool["팀코드"]
+                .astype(str)
+                .isin(selected_team_codes)
+            ]
+
+        attack_positions = set(
             team_base["공격수포지션"]
             .dropna()
             .astype(str)
-            .unique()
             .tolist()
+        )
+        receive_positions = set(
+            receive_position_pool["포지션"]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
+
+        position_options = ["전체 포지션"] + sorted(
+            attack_positions | receive_positions
         )
 
         selected_position = st.selectbox(
@@ -617,17 +646,18 @@ with st.sidebar:
                 .isin(selected_team_codes)
             ]
 
-        receive_players = set()
+        if selected_position != "전체 포지션":
+            receive_player_pool = receive_player_pool[
+                receive_player_pool["포지션"].astype(str)
+                == selected_position
+            ]
 
-        # 리시브 데이터에는 포지션 정보가 없으므로,
-        # 전체 포지션일 때는 공격 기록이 없는 리베로/수비 선수까지 포함합니다.
-        if selected_position == "전체 포지션":
-            receive_players = set(
-                receive_player_pool["선수"]
-                .dropna()
-                .astype(str)
-                .tolist()
-            )
+        receive_players = set(
+            receive_player_pool["선수"]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
 
         available_players = sorted(
             attack_players | receive_players
@@ -679,9 +709,20 @@ with st.sidebar:
 
     else:
         # 비교 모드에서는 팀 A / 팀 B를 독립적으로 선택
-        # 서로 다른 팀 선수도 비교할 수 있음
+        # 공격 기록이 없는 리베로도 리시브 데이터에서 선수 목록에 포함합니다.
         team_base = season_base.copy()
         position_base = season_base.copy()
+
+        team_code_map = (
+            season_base[
+                ["팀", "팀코드"]
+            ]
+            .dropna()
+            .drop_duplicates(subset=["팀"])
+            .set_index("팀")["팀코드"]
+            .astype(str)
+            .to_dict()
+        )
 
         selected_team_a = st.selectbox(
             "팀 A",
@@ -689,17 +730,29 @@ with st.sidebar:
             index=0,
             key="compare_team_a",
         )
+        team_a_code = team_code_map.get(selected_team_a, "")
 
-        player_a_pool = season_base[
-            season_base["팀"].astype(str) == selected_team_a
-        ].copy()
-
-        player_a_options = sorted(
-            player_a_pool["공격수"]
+        attack_a_players = set(
+            season_base.loc[
+                season_base["팀"].astype(str) == selected_team_a,
+                "공격수",
+            ]
             .dropna()
             .astype(str)
-            .unique()
             .tolist()
+        )
+        receive_a_players = set(
+            receives.loc[
+                (receives["시즌코드"].astype(str) == str(selected_season_code))
+                & (receives["팀코드"].astype(str) == str(team_a_code)),
+                "선수",
+            ]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
+        player_a_options = sorted(
+            attack_a_players | receive_a_players
         )
 
         selected_player_a = st.selectbox(
@@ -715,17 +768,29 @@ with st.sidebar:
             index=(1 if len(team_options) > 1 else 0),
             key="compare_team_b",
         )
+        team_b_code = team_code_map.get(selected_team_b, "")
 
-        player_b_pool = season_base[
-            season_base["팀"].astype(str) == selected_team_b
-        ].copy()
-
-        player_b_options = sorted(
-            player_b_pool["공격수"]
+        attack_b_players = set(
+            season_base.loc[
+                season_base["팀"].astype(str) == selected_team_b,
+                "공격수",
+            ]
             .dropna()
             .astype(str)
-            .unique()
             .tolist()
+        )
+        receive_b_players = set(
+            receives.loc[
+                (receives["시즌코드"].astype(str) == str(selected_season_code))
+                & (receives["팀코드"].astype(str) == str(team_b_code)),
+                "선수",
+            ]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
+        player_b_options = sorted(
+            attack_b_players | receive_b_players
         )
 
         if (
@@ -745,22 +810,62 @@ with st.sidebar:
             key="compare_player_b",
         )
 
-        scope_source = season_base[
+        attack_scope_source = season_base[
             (
                 (season_base["팀"].astype(str) == selected_team_a)
-                & (
-                    season_base["공격수"].astype(str)
-                    == selected_player_a
-                )
+                & (season_base["공격수"].astype(str) == selected_player_a)
             )
             | (
                 (season_base["팀"].astype(str) == selected_team_b)
-                & (
-                    season_base["공격수"].astype(str)
-                    == selected_player_b
+                & (season_base["공격수"].astype(str) == selected_player_b)
+            )
+        ].copy()
+
+        receive_scope_source = receives[
+            (receives["시즌코드"].astype(str) == str(selected_season_code))
+            & (
+                (
+                    (receives["팀코드"].astype(str) == str(team_a_code))
+                    & (receives["선수"].astype(str) == selected_player_a)
+                )
+                | (
+                    (receives["팀코드"].astype(str) == str(team_b_code))
+                    & (receives["선수"].astype(str) == selected_player_b)
                 )
             )
         ].copy()
+
+        receive_scope_meta = pd.DataFrame(
+            {
+                "대회구분": receive_scope_source["대회구분"],
+                "경기구분": (
+                    receive_scope_source["라운드"]
+                    .astype(str)
+                    .map(lambda x: f"{x}라운드")
+                ),
+                "경기일": receive_scope_source["경기일"],
+                "경기번호": receive_scope_source["경기번호"],
+                "팀": receive_scope_source["팀"],
+                "상대팀": receive_scope_source["상대팀"],
+            }
+        )
+
+        scope_source = pd.concat(
+            [
+                attack_scope_source[
+                    [
+                        "대회구분",
+                        "경기구분",
+                        "경기일",
+                        "경기번호",
+                        "팀",
+                        "상대팀",
+                    ]
+                ],
+                receive_scope_meta,
+            ],
+            ignore_index=True,
+        ).drop_duplicates()
 
     available_competitions = set(
         scope_source["대회구분"]
@@ -920,36 +1025,12 @@ receive_scope = apply_receive_scope(
     selected_game_key,
 )
 
-# 리시브 이벤트에는 포지션이 없으므로 공격 데이터에서 포지션 매핑
-position_map = (
-    season_base[
-        ["팀", "공격수", "공격수포지션"]
-    ]
-    .dropna(subset=["공격수"])
-    .drop_duplicates(
-        subset=["팀", "공격수"],
-        keep="first",
-    )
-    .rename(
-        columns={
-            "공격수": "선수",
-            "공격수포지션": "포지션",
-        }
-    )
-)
-
-receive_scope = receive_scope.merge(
-    position_map,
-    on=["팀", "선수"],
-    how="left",
-)
-
+# 최종 리시브 데이터에는 API 선수 정보 기반 포지션이 포함되어 있습니다.
 if selected_position != "전체 포지션":
     receive_scope = receive_scope[
         receive_scope["포지션"].astype(str)
         == selected_position
     ]
-
 
 # ==========================================
 # 선수 비교
@@ -960,56 +1041,56 @@ if (
     and selected_player_a is not None
     and selected_player_b is not None
 ):
+    team_code_map = (
+        season_base[["팀", "팀코드"]]
+        .dropna()
+        .drop_duplicates(subset=["팀"])
+        .set_index("팀")["팀코드"]
+        .astype(str)
+        .to_dict()
+    )
+
+    a_team_code = team_code_map.get(selected_team_a, "")
+    b_team_code = team_code_map.get(selected_team_b, "")
+    a_team_name = selected_team_a
+    b_team_name = selected_team_b
+    a_color = get_team_color(str(selected_season_code), str(a_team_code))
+    b_color = get_team_color(str(selected_season_code), str(b_team_code))
+
+    st.subheader(
+        f"{selected_player_a} vs {selected_player_b}"
+    )
+
+    if selected_game_label:
+        st.markdown(f"**선택 경기:** {selected_game_label}")
+
+    st.caption(
+        f"{selected_player_a}: {a_team_name} · "
+        f"{selected_player_b}: {b_team_name}"
+    )
+
+    # ------------------------------
+    # 공격 비교
+    # ------------------------------
     compare_base = apply_attack_scope(
         season_base,
         selected_scope,
         selected_game_key,
     )
 
-    compare_base = compare_base[
-        (
-            (compare_base["팀"].astype(str) == selected_team_a)
-            & (
-                compare_base["공격수"].astype(str)
-                == selected_player_a
-            )
-        )
-        | (
-            (compare_base["팀"].astype(str) == selected_team_b)
-            & (
-                compare_base["공격수"].astype(str)
-                == selected_player_b
-            )
-        )
+    player_a_df = compare_base[
+        (compare_base["팀"].astype(str) == selected_team_a)
+        & (compare_base["공격수"].astype(str) == selected_player_a)
     ].copy()
 
-    if compare_base.empty:
-        st.info("선택한 범위에 두 선수의 공격 기록이 없습니다.")
+    player_b_df = compare_base[
+        (compare_base["팀"].astype(str) == selected_team_b)
+        & (compare_base["공격수"].astype(str) == selected_player_b)
+    ].copy()
 
+    if player_a_df.empty and player_b_df.empty:
+        st.info("선택한 범위에서 두 선수의 공격 기록은 없습니다.")
     else:
-        st.subheader(
-            f"{selected_player_a} vs {selected_player_b}"
-        )
-
-        if selected_game_label:
-            st.markdown(f"**선택 경기:** {selected_game_label}")
-
-        player_a_df = compare_base[
-            (compare_base["팀"].astype(str) == selected_team_a)
-            & (
-                compare_base["공격수"].astype(str)
-                == selected_player_a
-            )
-        ].copy()
-
-        player_b_df = compare_base[
-            (compare_base["팀"].astype(str) == selected_team_b)
-            & (
-                compare_base["공격수"].astype(str)
-                == selected_player_b
-            )
-        ].copy()
-
         def comparison_rows(player_df):
             rows = []
 
@@ -1024,61 +1105,26 @@ if (
             )
 
             plain3_mask = plain_three_point_mask(player_df)
-
             if plain3_mask is not None:
-                s_plain3 = attack_summary(
-                    player_df[plain3_mask]
-                )
+                s = attack_summary(player_df[plain3_mask])
                 rows.append(
                     {
                         "상황": "3점차 이내",
-                        "공격시도": s_plain3["공격시도"],
-                        "공격성공률_%": s_plain3["공격성공률_%"],
-                        "공격효율_%": s_plain3["공격효율_%"],
-                    }
-                )
-
-            if "후반5점차이내" in player_df.columns:
-                s5 = attack_summary(
-                    player_df[
-                        player_df["후반5점차이내"] == True
-                    ]
-                )
-                rows.append(
-                    {
-                        "상황": "후반 5점차 이내",
-                        "공격시도": s5["공격시도"],
-                        "공격성공률_%": s5["공격성공률_%"],
-                        "공격효율_%": s5["공격효율_%"],
-                    }
-                )
-
-            if "후반3점차이내" in player_df.columns:
-                s3 = attack_summary(
-                    player_df[
-                        player_df["후반3점차이내"] == True
-                    ]
-                )
-                rows.append(
-                    {
-                        "상황": "후반 3점차 이내",
-                        "공격시도": s3["공격시도"],
-                        "공격성공률_%": s3["공격성공률_%"],
-                        "공격효율_%": s3["공격효율_%"],
+                        "공격시도": s["공격시도"],
+                        "공격성공률_%": s["공격성공률_%"],
+                        "공격효율_%": s["공격효율_%"],
                     }
                 )
 
             for col, label in [
+                ("후반5점차이내", "후반 5점차 이내"),
+                ("후반3점차이내", "후반 3점차 이내"),
                 ("접전세트", "접전 세트"),
                 ("듀스세트", "듀스 세트"),
                 ("경기결정세트", "경기 결정 세트"),
             ]:
                 if col in player_df.columns:
-                    s = attack_summary(
-                        player_df[
-                            player_df[col] == True
-                        ]
-                    )
+                    s = attack_summary(player_df[player_df[col] == True])
                     rows.append(
                         {
                             "상황": label,
@@ -1115,49 +1161,8 @@ if (
             categories=situation_order,
             ordered=True,
         )
-
-        compare_df = (
-            compare_df
-            .sort_values("상황")
-            .reset_index(drop=True)
-        )
-
+        compare_df = compare_df.sort_values("상황").reset_index(drop=True)
         compare_df["상황"] = compare_df["상황"].astype(str)
-
-        # 선수 소속팀 색상
-        def player_team_meta(df):
-            if df.empty:
-                return (
-                    str(selected_season_code),
-                    "",
-                    "",
-                )
-            return (
-                str(df["시즌코드"].iloc[0]),
-                str(df["팀코드"].iloc[0]),
-                str(df["팀"].iloc[0]),
-            )
-
-        a_season, a_team_code, a_team_name = player_team_meta(
-            player_a_df
-        )
-        b_season, b_team_code, b_team_name = player_team_meta(
-            player_b_df
-        )
-
-        a_color = get_team_color(
-            a_season,
-            a_team_code,
-        )
-        b_color = get_team_color(
-            b_season,
-            b_team_code,
-        )
-
-        st.caption(
-            f"{selected_player_a}: {a_team_name} · "
-            f"{selected_player_b}: {b_team_name}"
-        )
 
         st.caption(
             "접전 기준은 공격 직전 점수를 기준으로 계산합니다. "
@@ -1167,29 +1172,25 @@ if (
         st.markdown("### 상황별 공격 성공률 비교")
 
         graph_rows = []
-
         for _, row in compare_df.iterrows():
-            graph_rows.append(
-                {
-                    "상황": row["상황"],
-                    "선수": selected_player_a,
-                    "공격성공률_%": row["공격성공률_%_A"],
-                    "공격시도": int(row["공격시도_A"]),
-                }
-            )
-            graph_rows.append(
-                {
-                    "상황": row["상황"],
-                    "선수": selected_player_b,
-                    "공격성공률_%": row["공격성공률_%_B"],
-                    "공격시도": int(row["공격시도_B"]),
-                }
+            graph_rows.extend(
+                [
+                    {
+                        "상황": row["상황"],
+                        "선수": selected_player_a,
+                        "공격성공률_%": row["공격성공률_%_A"],
+                        "공격시도": int(row["공격시도_A"]),
+                    },
+                    {
+                        "상황": row["상황"],
+                        "선수": selected_player_b,
+                        "공격성공률_%": row["공격성공률_%_B"],
+                        "공격시도": int(row["공격시도_B"]),
+                    },
+                ]
             )
 
         graph_df = pd.DataFrame(graph_rows)
-
-        # color별 trace로 나뉘어도 각 막대의 라벨이 정확히 따라가도록
-        # 표시 문자열을 각 행에 미리 저장합니다.
         graph_df["표시"] = graph_df.apply(
             lambda row: (
                 f"{row['공격성공률_%']:.1f}%"
@@ -1221,13 +1222,9 @@ if (
         fig_compare.update_traces(
             textposition="outside",
             cliponaxis=False,
-            textfont=dict(
-                size=BAR_LABEL_SIZE,
-                color="black",
-            ),
+            textfont=dict(size=BAR_LABEL_SIZE, color="black"),
             hovertemplate=(
-                "%{x}<br>"
-                "%{fullData.name}<br>"
+                "%{x}<br>%{fullData.name}<br>"
                 "공격 성공률 %{y:.1f}%<br>"
                 "공격 시도 %{customdata[0]:,}회"
                 "<extra></extra>"
@@ -1245,29 +1242,17 @@ if (
             margin=dict(l=60, r=40, t=40, b=80),
             uniformtext_minsize=BAR_LABEL_SIZE,
             uniformtext_mode="show",
-            font=dict(
-                size=BODY_TEXT_SIZE,
-                color="black",
-            ),
+            font=dict(size=BODY_TEXT_SIZE, color="black"),
             xaxis=dict(
-                tickfont=dict(
-                    size=AXIS_TICK_SIZE,
-                    color="black",
-                ),
+                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
                 showline=True,
                 linecolor="black",
             ),
             yaxis=dict(
                 range=[0, max_compare_rate + 14],
                 ticksuffix="%",
-                tickfont=dict(
-                    size=AXIS_TICK_SIZE,
-                    color="black",
-                ),
-                title_font=dict(
-                    size=AXIS_TITLE_SIZE,
-                    color="black",
-                ),
+                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
                 showgrid=True,
                 gridcolor="rgba(0,0,0,0.12)",
                 showline=True,
@@ -1275,71 +1260,38 @@ if (
             ),
             legend=dict(
                 title_text="",
-                font=dict(
-                    size=BODY_TEXT_SIZE,
-                    color="black",
-                ),
+                font=dict(size=BODY_TEXT_SIZE, color="black"),
             ),
         )
 
-        st.plotly_chart(
-            fig_compare,
-            use_container_width=True,
-        )
+        st.plotly_chart(fig_compare, use_container_width=True)
 
         st.markdown("### 상세 비교")
-        st.caption(
-            "같은 지표의 두 선수 값을 바로 옆에 배치했습니다."
-        )
+        st.caption("같은 지표의 두 선수 값을 바로 옆에 배치했습니다.")
 
         attempts_table = pd.DataFrame(
             {
                 "상황": compare_df["상황"],
-                selected_player_a: (
-                    compare_df["공격시도_A"]
-                    .astype(int)
-                ),
-                selected_player_b: (
-                    compare_df["공격시도_B"]
-                    .astype(int)
-                ),
+                selected_player_a: compare_df["공격시도_A"].astype(int),
+                selected_player_b: compare_df["공격시도_B"].astype(int),
             }
         )
-
         success_table = pd.DataFrame(
             {
                 "상황": compare_df["상황"],
-                selected_player_a: (
-                    compare_df["공격성공률_%_A"]
-                    .round(1)
-                ),
-                selected_player_b: (
-                    compare_df["공격성공률_%_B"]
-                    .round(1)
-                ),
+                selected_player_a: compare_df["공격성공률_%_A"].round(1),
+                selected_player_b: compare_df["공격성공률_%_B"].round(1),
             }
         )
-
         efficiency_table = pd.DataFrame(
             {
                 "상황": compare_df["상황"],
-                selected_player_a: (
-                    compare_df["공격효율_%_A"]
-                    .round(1)
-                ),
-                selected_player_b: (
-                    compare_df["공격효율_%_B"]
-                    .round(1)
-                ),
+                selected_player_a: compare_df["공격효율_%_A"].round(1),
+                selected_player_b: compare_df["공격효율_%_B"].round(1),
             }
         )
 
-        compact_height = (
-            58
-            + 54 * len(compare_df)
-            + 8
-        )
-
+        compact_height = 58 + 54 * len(compare_df) + 8
         t1, t2, t3 = st.columns(3)
 
         with t1:
@@ -1350,7 +1302,6 @@ if (
                 hide_index=True,
                 height=compact_height,
             )
-
         with t2:
             st.markdown("#### 공격 성공률")
             st.dataframe(
@@ -1359,15 +1310,10 @@ if (
                 hide_index=True,
                 height=compact_height,
                 column_config={
-                    selected_player_a: st.column_config.NumberColumn(
-                        format="%.1f%%"
-                    ),
-                    selected_player_b: st.column_config.NumberColumn(
-                        format="%.1f%%"
-                    ),
+                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
                 },
             )
-
         with t3:
             st.markdown("#### 공격 효율")
             st.dataframe(
@@ -1376,347 +1322,232 @@ if (
                 hide_index=True,
                 height=compact_height,
                 column_config={
-                    selected_player_a: st.column_config.NumberColumn(
-                        format="%.1f%%"
-                    ),
-                    selected_player_b: st.column_config.NumberColumn(
-                        format="%.1f%%"
-                    ),
+                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
                 },
             )
 
-        if "후반5점차이내" not in compare_base.columns:
-            st.caption(
-                "※ 후반 5점차 이내는 현재 저장 데이터에 별도 플래그가 없어 "
-                "다음 데이터 갱신 때 추가할 예정입니다."
-            )
+    # ------------------------------
+    # 리시브 비교
+    # ------------------------------
+    receive_compare_base = receives[
+        receives["시즌코드"].astype(str)
+        == str(selected_season_code)
+    ].copy()
 
-        # ------------------------------
-        # 리시브 비교
-        # ------------------------------
-        receive_compare_base = enrich_receive_set_tags(
-            receives,
-            set_summary,
+    receive_compare_base = apply_receive_scope(
+        receive_compare_base,
+        selected_scope,
+        selected_game_key,
+    )
+
+    player_a_receive = receive_compare_base[
+        (receive_compare_base["팀코드"].astype(str) == str(a_team_code))
+        & (receive_compare_base["선수"].astype(str) == selected_player_a)
+    ].copy()
+
+    player_b_receive = receive_compare_base[
+        (receive_compare_base["팀코드"].astype(str) == str(b_team_code))
+        & (receive_compare_base["선수"].astype(str) == selected_player_b)
+    ].copy()
+
+    if player_a_receive.empty and player_b_receive.empty:
+        st.info("선택한 범위에서 두 선수의 리시브 기록은 없습니다.")
+    else:
+        st.divider()
+        st.subheader("리시브 비교")
+        st.caption(
+            "점수차 기준은 리시브가 발생한 랠리 시작 직전 점수입니다. "
+            "'3점차 이내'는 세트 진행 시점과 관계없이 적용합니다."
         )
 
-        receive_compare_base = receive_compare_base[
-            receive_compare_base["시즌코드"].astype(str)
-            == str(selected_season_code)
-        ].copy()
+        a_receive_summary = receive_comparison_rows(player_a_receive)
+        b_receive_summary = receive_comparison_rows(player_b_receive)
 
-        receive_compare_base = apply_receive_scope(
-            receive_compare_base,
-            selected_scope,
-            selected_game_key,
-        )
+        receive_compare_df = a_receive_summary.merge(
+            b_receive_summary,
+            on="상황",
+            how="outer",
+            suffixes=("_A", "_B"),
+        ).fillna(0)
 
-        player_a_receive = receive_compare_base[
-            (
-                receive_compare_base["팀코드"].astype(str)
-                == str(a_team_code)
-            )
-            & (
-                receive_compare_base["선수"].astype(str)
-                == selected_player_a
-            )
-        ].copy()
-
-        player_b_receive = receive_compare_base[
-            (
-                receive_compare_base["팀코드"].astype(str)
-                == str(b_team_code)
-            )
-            & (
-                receive_compare_base["선수"].astype(str)
-                == selected_player_b
-            )
-        ].copy()
-
-        if (
-            not player_a_receive.empty
-            or not player_b_receive.empty
-        ):
-            st.divider()
-            st.subheader("리시브 비교")
-
-            a_receive_summary = receive_comparison_rows(
-                player_a_receive
-            )
-            b_receive_summary = receive_comparison_rows(
-                player_b_receive
-            )
-
-            receive_compare_df = a_receive_summary.merge(
-                b_receive_summary,
-                on="상황",
-                how="outer",
-                suffixes=("_A", "_B"),
-            ).fillna(0)
-
-            receive_graph_rows = []
-
-            for _, row in receive_compare_df.iterrows():
-                receive_graph_rows.append(
+        receive_graph_rows = []
+        for _, row in receive_compare_df.iterrows():
+            receive_graph_rows.extend(
+                [
                     {
                         "상황": row["상황"],
                         "선수": selected_player_a,
                         "리시브효율_%": row["리시브효율_%_A"],
                         "리시브시도": int(row["리시브시도_A"]),
-                    }
-                )
-                receive_graph_rows.append(
+                    },
                     {
                         "상황": row["상황"],
                         "선수": selected_player_b,
                         "리시브효율_%": row["리시브효율_%_B"],
                         "리시브시도": int(row["리시브시도_B"]),
-                    }
-                )
-
-            receive_graph_df = pd.DataFrame(
-                receive_graph_rows
+                    },
+                ]
             )
 
-            receive_graph_df["표시"] = (
-                receive_graph_df.apply(
-                    lambda row: (
-                        f"{row['리시브효율_%']:.1f}%"
-                        f"<br>({int(row['리시브시도']):,}회)"
-                    ),
-                    axis=1,
-                )
-            )
+        receive_graph_df = pd.DataFrame(receive_graph_rows)
+        receive_graph_df["표시"] = receive_graph_df.apply(
+            lambda row: (
+                f"{row['리시브효율_%']:.1f}%"
+                f"<br>({int(row['리시브시도']):,}회)"
+            ),
+            axis=1,
+        )
 
-            fig_receive_compare = px.bar(
-                receive_graph_df,
-                x="상황",
-                y="리시브효율_%",
-                color="선수",
-                text="표시",
-                barmode="group",
-                color_discrete_map={
-                    selected_player_a: a_color,
-                    selected_player_b: b_color,
-                },
-                custom_data=["리시브시도"],
-                labels={
-                    "상황": "",
-                    "리시브효율_%": "리시브 효율 (%)",
-                    "선수": "",
-                    "표시": "",
-                },
-            )
+        fig_receive_compare = px.bar(
+            receive_graph_df,
+            x="상황",
+            y="리시브효율_%",
+            color="선수",
+            text="표시",
+            barmode="group",
+            color_discrete_map={
+                selected_player_a: a_color,
+                selected_player_b: b_color,
+            },
+            custom_data=["리시브시도"],
+            labels={
+                "상황": "",
+                "리시브효율_%": "리시브 효율 (%)",
+                "선수": "",
+                "표시": "",
+            },
+        )
 
-            fig_receive_compare.update_traces(
-                textposition="outside",
-                cliponaxis=False,
-                textfont=dict(
-                    size=BAR_LABEL_SIZE,
-                    color="black",
-                ),
-                hovertemplate=(
-                    "%{x}<br>"
-                    "%{fullData.name}<br>"
-                    "리시브 효율 %{y:.1f}%<br>"
-                    "리시브 시도 %{customdata[0]:,}회"
-                    "<extra></extra>"
-                ),
-            )
+        fig_receive_compare.update_traces(
+            textposition="outside",
+            cliponaxis=False,
+            textfont=dict(size=BAR_LABEL_SIZE, color="black"),
+            hovertemplate=(
+                "%{x}<br>%{fullData.name}<br>"
+                "리시브 효율 %{y:.1f}%<br>"
+                "리시브 시도 %{customdata[0]:,}회"
+                "<extra></extra>"
+            ),
+        )
 
-            max_receive_rate = (
-                float(
-                    receive_graph_df["리시브효율_%"].max()
-                )
-                if not receive_graph_df.empty
-                else 0
-            )
+        max_receive_rate = (
+            float(receive_graph_df["리시브효율_%"].max())
+            if not receive_graph_df.empty
+            else 0
+        )
 
-            fig_receive_compare.update_layout(
-                height=460,
-                margin=dict(
-                    l=60,
-                    r=40,
-                    t=40,
-                    b=70,
-                ),
-                uniformtext_minsize=BAR_LABEL_SIZE,
-                uniformtext_mode="show",
-                font=dict(
-                    size=BODY_TEXT_SIZE,
-                    color="black",
-                ),
-                xaxis=dict(
-                    tickfont=dict(
-                        size=AXIS_TICK_SIZE,
-                        color="black",
-                    ),
-                    showline=True,
-                    linecolor="black",
-                ),
-                yaxis=dict(
-                    range=[
-                        0,
-                        max_receive_rate + 14,
-                    ],
-                    ticksuffix="%",
-                    tickfont=dict(
-                        size=AXIS_TICK_SIZE,
-                        color="black",
-                    ),
-                    title_font=dict(
-                        size=AXIS_TITLE_SIZE,
-                        color="black",
-                    ),
-                    showgrid=True,
-                    gridcolor="rgba(0,0,0,0.12)",
-                    showline=True,
-                    linecolor="black",
-                ),
-                legend=dict(
-                    title_text="",
-                    font=dict(
-                        size=BODY_TEXT_SIZE,
-                        color="black",
-                    ),
-                ),
-            )
+        fig_receive_compare.update_layout(
+            height=560,
+            margin=dict(l=60, r=40, t=40, b=80),
+            uniformtext_minsize=BAR_LABEL_SIZE,
+            uniformtext_mode="show",
+            font=dict(size=BODY_TEXT_SIZE, color="black"),
+            xaxis=dict(
+                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                showline=True,
+                linecolor="black",
+            ),
+            yaxis=dict(
+                range=[0, max_receive_rate + 14],
+                ticksuffix="%",
+                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.12)",
+                showline=True,
+                linecolor="black",
+            ),
+            legend=dict(
+                title_text="",
+                font=dict(size=BODY_TEXT_SIZE, color="black"),
+            ),
+        )
 
-            st.plotly_chart(
-                fig_receive_compare,
+        st.plotly_chart(
+            fig_receive_compare,
+            use_container_width=True,
+        )
+
+        st.markdown("### 리시브 상세 비교")
+        st.caption("같은 지표의 두 선수 값을 바로 옆에 배치했습니다.")
+
+        receive_attempts_table = pd.DataFrame(
+            {
+                "상황": receive_compare_df["상황"],
+                selected_player_a: receive_compare_df["리시브시도_A"].astype(int),
+                selected_player_b: receive_compare_df["리시브시도_B"].astype(int),
+            }
+        )
+        receive_exact_table = pd.DataFrame(
+            {
+                "상황": receive_compare_df["상황"],
+                selected_player_a: receive_compare_df["정확리시브율_%_A"].round(1),
+                selected_player_b: receive_compare_df["정확리시브율_%_B"].round(1),
+            }
+        )
+        receive_fail_table = pd.DataFrame(
+            {
+                "상황": receive_compare_df["상황"],
+                selected_player_a: receive_compare_df["실패율_%_A"].round(1),
+                selected_player_b: receive_compare_df["실패율_%_B"].round(1),
+            }
+        )
+        receive_eff_table = pd.DataFrame(
+            {
+                "상황": receive_compare_df["상황"],
+                selected_player_a: receive_compare_df["리시브효율_%_A"].round(1),
+                selected_player_b: receive_compare_df["리시브효율_%_B"].round(1),
+            }
+        )
+
+        receive_table_height = 58 + 54 * len(receive_compare_df) + 8
+        rc1, rc2 = st.columns(2)
+        rc3, rc4 = st.columns(2)
+
+        with rc1:
+            st.markdown("#### 리시브 시도")
+            st.dataframe(
+                receive_attempts_table,
                 use_container_width=True,
+                hide_index=True,
+                height=receive_table_height,
             )
-
-            st.markdown("### 리시브 상세 비교")
-
-            receive_attempts_table = pd.DataFrame(
-                {
-                    "상황": receive_compare_df["상황"],
-                    selected_player_a: (
-                        receive_compare_df["리시브시도_A"]
-                        .astype(int)
-                    ),
-                    selected_player_b: (
-                        receive_compare_df["리시브시도_B"]
-                        .astype(int)
-                    ),
-                }
+        with rc2:
+            st.markdown("#### 정확 리시브율")
+            st.dataframe(
+                receive_exact_table,
+                use_container_width=True,
+                hide_index=True,
+                height=receive_table_height,
+                column_config={
+                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                },
             )
-
-            receive_exact_table = pd.DataFrame(
-                {
-                    "상황": receive_compare_df["상황"],
-                    selected_player_a: (
-                        receive_compare_df["정확리시브율_%_A"]
-                        .round(1)
-                    ),
-                    selected_player_b: (
-                        receive_compare_df["정확리시브율_%_B"]
-                        .round(1)
-                    ),
-                }
+        with rc3:
+            st.markdown("#### 리시브 실패율")
+            st.dataframe(
+                receive_fail_table,
+                use_container_width=True,
+                hide_index=True,
+                height=receive_table_height,
+                column_config={
+                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                },
             )
-
-            receive_fail_table = pd.DataFrame(
-                {
-                    "상황": receive_compare_df["상황"],
-                    selected_player_a: (
-                        receive_compare_df["실패율_%_A"]
-                        .round(1)
-                    ),
-                    selected_player_b: (
-                        receive_compare_df["실패율_%_B"]
-                        .round(1)
-                    ),
-                }
-            )
-
-            receive_eff_table = pd.DataFrame(
-                {
-                    "상황": receive_compare_df["상황"],
-                    selected_player_a: (
-                        receive_compare_df["리시브효율_%_A"]
-                        .round(1)
-                    ),
-                    selected_player_b: (
-                        receive_compare_df["리시브효율_%_B"]
-                        .round(1)
-                    ),
-                }
-            )
-
-            receive_table_height = (
-                58
-                + 54 * len(receive_compare_df)
-                + 8
-            )
-
-            rc1, rc2 = st.columns(2)
-            rc3, rc4 = st.columns(2)
-
-            with rc1:
-                st.markdown("#### 리시브 시도")
-                st.dataframe(
-                    receive_attempts_table,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=receive_table_height,
-                )
-
-            with rc2:
-                st.markdown("#### 정확 리시브율")
-                st.dataframe(
-                    receive_exact_table,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=receive_table_height,
-                    column_config={
-                        selected_player_a: st.column_config.NumberColumn(
-                            format="%.1f%%"
-                        ),
-                        selected_player_b: st.column_config.NumberColumn(
-                            format="%.1f%%"
-                        ),
-                    },
-                )
-
-            with rc3:
-                st.markdown("#### 리시브 실패율")
-                st.dataframe(
-                    receive_fail_table,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=receive_table_height,
-                    column_config={
-                        selected_player_a: st.column_config.NumberColumn(
-                            format="%.1f%%"
-                        ),
-                        selected_player_b: st.column_config.NumberColumn(
-                            format="%.1f%%"
-                        ),
-                    },
-                )
-
-            with rc4:
-                st.markdown("#### 리시브 효율")
-                st.dataframe(
-                    receive_eff_table,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=receive_table_height,
-                    column_config={
-                        selected_player_a: st.column_config.NumberColumn(
-                            format="%.1f%%"
-                        ),
-                        selected_player_b: st.column_config.NumberColumn(
-                            format="%.1f%%"
-                        ),
-                    },
-                )
-
-            st.caption(
-                "접전 세트·듀스 세트·경기 결정 세트는 세트 결과 기준으로 계산합니다. "
-                "3점차 이내·후반 5점차 이내·후반 3점차 이내는 "
-                "리시브가 발생한 랠리 시작 시점의 점수 데이터가 추가되면 확장합니다."
+        with rc4:
+            st.markdown("#### 리시브 효율")
+            st.dataframe(
+                receive_eff_table,
+                use_container_width=True,
+                hide_index=True,
+                height=receive_table_height,
+                column_config={
+                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                },
             )
 
 
