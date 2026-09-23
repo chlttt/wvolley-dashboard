@@ -203,10 +203,14 @@ if rest_col and rest_col in analysis.columns:
     for value, part in analysis.dropna(subset=[rest_col]).groupby(rest_col):
         n, rate, eff = attack_metrics(part)
         rest_rows.append({"휴식일수": int(value), "공격시도": n, "공격성공률_%": rate, "공격효율_%": eff})
-    rest_summary = pd.DataFrame(rest_rows).sort_values("휴식일수")
+
+    # 팀/범위 필터 후 공격 이벤트가 0건이면 rest_rows 자체가 비므로
+    # 빈 DataFrame을 정렬하기 전에 먼저 검사한다.
+    rest_summary = pd.DataFrame(rest_rows)
     if rest_summary.empty:
-        st.info("휴식일수별 공격 기록이 없습니다.")
+        st.info("선택한 조건에서 휴식일수와 연결할 수 있는 공격 기록이 없습니다.")
     else:
+        rest_summary = rest_summary.sort_values("휴식일수")
         fig_rest = px.bar(
             rest_summary,
             x="휴식일수",
