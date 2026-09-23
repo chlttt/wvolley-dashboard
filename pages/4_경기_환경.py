@@ -91,12 +91,17 @@ st.caption("휴식일수, 홈·원정, 직전 경기장 간 직선거리와 경�
 season_col = "시즌명" if "시즌명" in schedule.columns else "시즌코드"
 
 season_labels = {}
-if "시즌코드" in schedule.columns and "시즌명" in schedule.columns:
+# 팀/선수 분석과 동일하게 season_routes의 '시즌명'을 화면 표시값으로 사용
+if "시즌코드" in routes.columns and "시즌명" in routes.columns:
+    season_pairs = routes[["시즌코드", "시즌명"]].dropna().drop_duplicates()
+    season_labels.update(
+        dict(zip(season_pairs["시즌코드"].astype(str), season_pairs["시즌명"].astype(str)))
+    )
+elif "시즌코드" in schedule.columns and "시즌명" in schedule.columns:
     season_pairs = schedule[["시즌코드", "시즌명"]].dropna().drop_duplicates()
     season_labels.update(
         dict(zip(season_pairs["시즌코드"].astype(str), season_pairs["시즌명"].astype(str)))
     )
-season_labels.setdefault("022", "2025-26")
 
 with st.sidebar:
     st.header("경기 환경 필터")
