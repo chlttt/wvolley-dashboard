@@ -1,0 +1,22 @@
+name: Probe KOVO serve events
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas requests
+      - run: python scripts/probe_serve_events.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: serve-probe-2526
+          path: serve_probe_2526.csv
