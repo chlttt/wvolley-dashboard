@@ -18,20 +18,29 @@ def get_json(url, params):
     return r.json()
 
 
-def rows_from_payload(payload):
-    if isinstance(payload, list):
-        return payload
-    if not isinstance(payload, dict):
-        return []
-    for key in ["data", "list", "result"]:
-        value = payload.get(key)
-        if isinstance(value, list):
-            return value
-        if isinstance(value, dict):
-            for key2 in ["list", "data"]:
-                if isinstance(value.get(key2), list):
-                    return value[key2]
-    return []
+def find_row_lists(obj):
+    """Recursively collect list-of-dict tables from KOVO payloads."""
+    found = []
+    if isinstance(obj, list):
+        if obj and all(isinstance(x, dict) for x in obj):
+            found.append(obj)
+        for x in obj:
+            found.extend(find_row_lists(x))
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            found.extend(find_row_lists(value))
+    return found
+
+
+def pick_rows(payload, required_keys):
+    candidates = find_row_lists(payload)
+    scored = []
+    for rows in candidates:
+        keys = set().union(*(r.keys() for r in rows[:10])) if rows else set()
+        score = len(keys.intersection(required_keys))
+        if score:
+            scored.append((score, len(rows), rows))
+    return max(scored, default=(0, 0, []), key=lambda x: (x[0], x[1]))[2]
 
 
 def main():
@@ -43,7 +52,7 @@ def main():
             "seasonCode": SEASON_CODE,
             "leagueCode": league,
         })
-        schedules.extend(rows_from_payload(payload))
+        schedules.extend(pick_rows(payload, {"gnum", "gameNo", "gameNumber", "gameDate", "homeTeam"}))
 
     probes = []
     seen = set()
@@ -61,7 +70,7 @@ def main():
                 })
             except requests.RequestException:
                 continue
-            rows = rows_from_payload(payload)
+            rows = pick_rows(payload, {"rindex", "raction", "raresult", "rpname", "rtname", "rtcode"})
             for row in rows:
                 probes.append({
                     "경기번호": gnum,
@@ -83,7 +92,10 @@ def main():
 
     df = pd.DataFrame(probes)
     if df.empty:
-        raise RuntimeError("No realtime rows were returned.")
+        raise RuntimeError(
+            "No realtime rows were returned. Schedule rows found: "
+            f"{len(schedules)}, game ids found: {len(seen)}"
+        )
 
     df.to_csv(OUT, index=False, encoding="utf-8-sig")
     print("rows:", len(df))
