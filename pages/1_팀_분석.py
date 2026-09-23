@@ -598,6 +598,132 @@ c2.metric("공격 성공률", f"{success_rate:.1f}%")
 c3.metric("공격 범실", f"{errors:,}회")
 c4.metric("블로킹 당함", f"{blocked:,}회")
 
+# 여러 경기 구분을 묶어 보는 범위에서는 라운드/포스트시즌 단계별 추이를 함께 표시
+if selected_scope in ["전체", "정규리그", "포스트시즌"]:
+    st.divider()
+    st.subheader("경기 구분별 공격 성공률")
+
+    phase_order = [
+        "1라운드", "2라운드", "3라운드",
+        "4라운드", "5라운드", "6라운드",
+        "준플레이오프", "플레이오프", "챔피언결정전",
+    ]
+
+    if selected_scope == "전체":
+        phase_source = team_base.copy()
+        visible_phases = phase_order
+    elif selected_scope == "정규리그":
+        phase_source = team_base[
+            team_base["대회구분"].astype(str) == "정규리그"
+        ].copy()
+        visible_phases = phase_order[:6]
+    else:
+        phase_source = team_base[
+            team_base["대회구분"].astype(str).isin(postseason_competitions)
+        ].copy()
+        visible_phases = phase_order[6:]
+
+    def phase_name(row):
+        competition = str(row["대회구분"])
+        if competition in postseason_competitions:
+            return competition
+        if competition == "정규리그":
+            return str(row["경기구분"])
+        return None
+
+    phase_source["구간"] = phase_source.apply(phase_name, axis=1)
+    phase_source = phase_source[
+        phase_source["구간"].isin(visible_phases)
+    ].copy()
+
+    phase_summary = (
+        phase_source
+        .groupby("구간")
+        .agg(
+            공격시도=("공격수", "size"),
+            공격성공=("공격성공", "sum"),
+        )
+        .reset_index()
+    )
+
+    if not phase_summary.empty:
+        phase_summary["공격성공률_%"] = (
+            phase_summary["공격성공"] / phase_summary["공격시도"] * 100
+        ).round(1)
+        phase_summary["구간"] = pd.Categorical(
+            phase_summary["구간"],
+            categories=visible_phases,
+            ordered=True,
+        )
+        phase_summary = phase_summary.sort_values("구간")
+
+        fig_phase = px.line(
+            phase_summary,
+            x="구간",
+            y="공격성공률_%",
+            markers=True,
+            custom_data=["공격시도", "공격성공"],
+            labels={
+                "구간": "",
+                "공격성공률_%": "공격 성공률 (%)",
+            },
+        )
+        fig_phase.update_traces(
+            line=dict(color=selected_team_color, width=4),
+            marker=dict(color=selected_team_color, size=11),
+            text=[
+                f"{rate:.1f}%<br>({attempt:,}회)"
+                for rate, attempt in zip(
+                    phase_summary["공격성공률_%"],
+                    phase_summary["공격시도"],
+                )
+            ],
+            textposition="top center",
+            mode="lines+markers+text",
+            textfont=dict(size=16, color="black"),
+            hovertemplate=(
+                "%{x}<br>"
+                "공격 성공률 %{y:.1f}%<br>"
+                "공격 시도 %{customdata[0]:,}회<br>"
+                "공격 성공 %{customdata[1]:,}회"
+                "<extra></extra>"
+            ),
+        )
+        fig_phase.update_layout(
+            height=520,
+            showlegend=False,
+            margin=dict(t=65, b=45),
+            font=dict(size=BODY_TEXT_SIZE, color="black"),
+            xaxis=dict(
+                categoryorder="array",
+                categoryarray=visible_phases,
+                tickfont=dict(size=16, color="black"),
+                showline=True,
+                linecolor="black",
+            ),
+            yaxis=dict(
+                range=[
+                    max(0, phase_summary["공격성공률_%"].min() - 8),
+                    min(100, phase_summary["공격성공률_%"].max() + 8),
+                ],
+                ticksuffix="%",
+                tickfont=dict(size=16, color="black"),
+                title_font=dict(size=20, color="black"),
+                gridcolor="rgba(0,0,0,0.12)",
+                showline=True,
+                linecolor="black",
+            ),
+        )
+        st.plotly_chart(fig_phase, use_container_width=True)
+        if selected_scope == "전체":
+            st.caption(
+                "정규리그 1~6라운드와 해당 팀이 실제 참가한 포스트시즌 단계만 이어서 표시합니다."
+            )
+        elif selected_scope == "포스트시즌":
+            st.caption(
+                "해당 팀이 실제 참가한 포스트시즌 단계만 표시합니다."
+            )
+
 st.divider()
 
 st.subheader("세트별 공격 성공률")
