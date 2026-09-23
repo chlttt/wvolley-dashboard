@@ -1069,488 +1069,497 @@ if (
         f"{selected_player_b}: {b_team_name}"
     )
 
-    # ------------------------------
-    # 공격 비교
-    # ------------------------------
-    compare_base = apply_attack_scope(
-        season_base,
-        selected_scope,
-        selected_game_key,
+    compare_detail_type = st.radio(
+        "비교 지표",
+        ["공격", "리시브"],
+        horizontal=True,
+        key="compare_detail_type",
     )
 
-    player_a_df = compare_base[
-        (compare_base["팀"].astype(str) == selected_team_a)
-        & (compare_base["공격수"].astype(str) == selected_player_a)
-    ].copy()
+    if compare_detail_type == "공격":
+        # ------------------------------
+        # 공격 비교
+        # ------------------------------
+        compare_base = apply_attack_scope(
+            season_base,
+            selected_scope,
+            selected_game_key,
+        )
 
-    player_b_df = compare_base[
-        (compare_base["팀"].astype(str) == selected_team_b)
-        & (compare_base["공격수"].astype(str) == selected_player_b)
-    ].copy()
+        player_a_df = compare_base[
+            (compare_base["팀"].astype(str) == selected_team_a)
+            & (compare_base["공격수"].astype(str) == selected_player_a)
+        ].copy()
 
-    if player_a_df.empty and player_b_df.empty:
-        st.info("선택한 범위에서 두 선수의 공격 기록은 없습니다.")
-    else:
-        def comparison_rows(player_df):
-            rows = []
+        player_b_df = compare_base[
+            (compare_base["팀"].astype(str) == selected_team_b)
+            & (compare_base["공격수"].astype(str) == selected_player_b)
+        ].copy()
 
-            whole = attack_summary(player_df)
-            rows.append(
-                {
-                    "상황": "전체",
-                    "공격시도": whole["공격시도"],
-                    "공격성공률_%": whole["공격성공률_%"],
-                    "공격효율_%": whole["공격효율_%"],
-                }
-            )
+        if player_a_df.empty and player_b_df.empty:
+            st.info("선택한 범위에서 두 선수의 공격 기록은 없습니다.")
+        else:
+            def comparison_rows(player_df):
+                rows = []
 
-            plain3_mask = plain_three_point_mask(player_df)
-            if plain3_mask is not None:
-                s = attack_summary(player_df[plain3_mask])
+                whole = attack_summary(player_df)
                 rows.append(
                     {
-                        "상황": "3점차 이내",
-                        "공격시도": s["공격시도"],
-                        "공격성공률_%": s["공격성공률_%"],
-                        "공격효율_%": s["공격효율_%"],
+                        "상황": "전체",
+                        "공격시도": whole["공격시도"],
+                        "공격성공률_%": whole["공격성공률_%"],
+                        "공격효율_%": whole["공격효율_%"],
                     }
                 )
 
-            for col, label in [
-                ("후반5점차이내", "후반 5점차 이내"),
-                ("후반3점차이내", "후반 3점차 이내"),
-                ("접전세트", "접전 세트"),
-                ("듀스세트", "듀스 세트"),
-                ("경기결정세트", "경기 결정 세트"),
-            ]:
-                if col in player_df.columns:
-                    s = attack_summary(player_df[player_df[col] == True])
+                plain3_mask = plain_three_point_mask(player_df)
+                if plain3_mask is not None:
+                    s = attack_summary(player_df[plain3_mask])
                     rows.append(
                         {
-                            "상황": label,
+                            "상황": "3점차 이내",
                             "공격시도": s["공격시도"],
                             "공격성공률_%": s["공격성공률_%"],
                             "공격효율_%": s["공격효율_%"],
                         }
                     )
 
-            return pd.DataFrame(rows)
+                for col, label in [
+                    ("후반5점차이내", "후반 5점차 이내"),
+                    ("후반3점차이내", "후반 3점차 이내"),
+                    ("접전세트", "접전 세트"),
+                    ("듀스세트", "듀스 세트"),
+                    ("경기결정세트", "경기 결정 세트"),
+                ]:
+                    if col in player_df.columns:
+                        s = attack_summary(player_df[player_df[col] == True])
+                        rows.append(
+                            {
+                                "상황": label,
+                                "공격시도": s["공격시도"],
+                                "공격성공률_%": s["공격성공률_%"],
+                                "공격효율_%": s["공격효율_%"],
+                            }
+                        )
 
-        a_summary = comparison_rows(player_a_df)
-        b_summary = comparison_rows(player_b_df)
+                return pd.DataFrame(rows)
 
-        compare_df = a_summary.merge(
-            b_summary,
-            on="상황",
-            how="outer",
-            suffixes=("_A", "_B"),
-        ).fillna(0)
+            a_summary = comparison_rows(player_a_df)
+            b_summary = comparison_rows(player_b_df)
 
-        situation_order = [
-            "전체",
-            "3점차 이내",
-            "후반 5점차 이내",
-            "후반 3점차 이내",
-            "접전 세트",
-            "듀스 세트",
-            "경기 결정 세트",
-        ]
+            compare_df = a_summary.merge(
+                b_summary,
+                on="상황",
+                how="outer",
+                suffixes=("_A", "_B"),
+            ).fillna(0)
 
-        compare_df["상황"] = pd.Categorical(
-            compare_df["상황"],
-            categories=situation_order,
-            ordered=True,
-        )
-        compare_df = compare_df.sort_values("상황").reset_index(drop=True)
-        compare_df["상황"] = compare_df["상황"].astype(str)
+            situation_order = [
+                "전체",
+                "3점차 이내",
+                "후반 5점차 이내",
+                "후반 3점차 이내",
+                "접전 세트",
+                "듀스 세트",
+                "경기 결정 세트",
+            ]
 
-        st.caption(
-            "접전 기준은 공격 직전 점수를 기준으로 계산합니다. "
-            "'3점차 이내'는 세트 진행 시점과 관계없이 점수차만 적용합니다."
-        )
+            compare_df["상황"] = pd.Categorical(
+                compare_df["상황"],
+                categories=situation_order,
+                ordered=True,
+            )
+            compare_df = compare_df.sort_values("상황").reset_index(drop=True)
+            compare_df["상황"] = compare_df["상황"].astype(str)
 
-        st.markdown("### 상황별 공격 성공률 비교")
-
-        graph_rows = []
-        for _, row in compare_df.iterrows():
-            graph_rows.extend(
-                [
-                    {
-                        "상황": row["상황"],
-                        "선수": selected_player_a,
-                        "공격성공률_%": row["공격성공률_%_A"],
-                        "공격시도": int(row["공격시도_A"]),
-                    },
-                    {
-                        "상황": row["상황"],
-                        "선수": selected_player_b,
-                        "공격성공률_%": row["공격성공률_%_B"],
-                        "공격시도": int(row["공격시도_B"]),
-                    },
-                ]
+            st.caption(
+                "접전 기준은 공격 직전 점수를 기준으로 계산합니다. "
+                "'3점차 이내'는 세트 진행 시점과 관계없이 점수차만 적용합니다."
             )
 
-        graph_df = pd.DataFrame(graph_rows)
-        graph_df["표시"] = graph_df.apply(
-            lambda row: (
-                f"{row['공격성공률_%']:.1f}%"
-                f"<br>({int(row['공격시도']):,}회)"
-            ),
-            axis=1,
-        )
+            st.markdown("### 상황별 공격 성공률 비교")
 
-        fig_compare = px.bar(
-            graph_df,
-            x="상황",
-            y="공격성공률_%",
-            color="선수",
-            text="표시",
-            barmode="group",
-            color_discrete_map={
-                selected_player_a: a_color,
-                selected_player_b: b_color,
-            },
-            custom_data=["공격시도"],
-            labels={
-                "상황": "",
-                "공격성공률_%": "공격 성공률 (%)",
-                "선수": "",
-                "표시": "",
-            },
-        )
+            graph_rows = []
+            for _, row in compare_df.iterrows():
+                graph_rows.extend(
+                    [
+                        {
+                            "상황": row["상황"],
+                            "선수": selected_player_a,
+                            "공격성공률_%": row["공격성공률_%_A"],
+                            "공격시도": int(row["공격시도_A"]),
+                        },
+                        {
+                            "상황": row["상황"],
+                            "선수": selected_player_b,
+                            "공격성공률_%": row["공격성공률_%_B"],
+                            "공격시도": int(row["공격시도_B"]),
+                        },
+                    ]
+                )
 
-        fig_compare.update_traces(
-            textposition="outside",
-            cliponaxis=False,
-            textfont=dict(size=BAR_LABEL_SIZE, color="black"),
-            hovertemplate=(
-                "%{x}<br>%{fullData.name}<br>"
-                "공격 성공률 %{y:.1f}%<br>"
-                "공격 시도 %{customdata[0]:,}회"
-                "<extra></extra>"
-            ),
-        )
+            graph_df = pd.DataFrame(graph_rows)
+            graph_df["표시"] = graph_df.apply(
+                lambda row: (
+                    f"{row['공격성공률_%']:.1f}%"
+                    f"<br>({int(row['공격시도']):,}회)"
+                ),
+                axis=1,
+            )
 
-        max_compare_rate = (
-            float(graph_df["공격성공률_%"].max())
-            if not graph_df.empty
-            else 0
-        )
+            fig_compare = px.bar(
+                graph_df,
+                x="상황",
+                y="공격성공률_%",
+                color="선수",
+                text="표시",
+                barmode="group",
+                color_discrete_map={
+                    selected_player_a: a_color,
+                    selected_player_b: b_color,
+                },
+                custom_data=["공격시도"],
+                labels={
+                    "상황": "",
+                    "공격성공률_%": "공격 성공률 (%)",
+                    "선수": "",
+                    "표시": "",
+                },
+            )
 
-        fig_compare.update_layout(
-            height=560,
-            margin=dict(l=60, r=40, t=40, b=80),
-            uniformtext_minsize=BAR_LABEL_SIZE,
-            uniformtext_mode="show",
-            font=dict(size=BODY_TEXT_SIZE, color="black"),
-            xaxis=dict(
-                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-                showline=True,
-                linecolor="black",
-            ),
-            yaxis=dict(
-                range=[0, max_compare_rate + 14],
-                ticksuffix="%",
-                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-                title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-                showgrid=True,
-                gridcolor="rgba(0,0,0,0.12)",
-                showline=True,
-                linecolor="black",
-            ),
-            legend=dict(
-                title_text="",
+            fig_compare.update_traces(
+                textposition="outside",
+                cliponaxis=False,
+                textfont=dict(size=BAR_LABEL_SIZE, color="black"),
+                hovertemplate=(
+                    "%{x}<br>%{fullData.name}<br>"
+                    "공격 성공률 %{y:.1f}%<br>"
+                    "공격 시도 %{customdata[0]:,}회"
+                    "<extra></extra>"
+                ),
+            )
+
+            max_compare_rate = (
+                float(graph_df["공격성공률_%"].max())
+                if not graph_df.empty
+                else 0
+            )
+
+            fig_compare.update_layout(
+                height=560,
+                margin=dict(l=60, r=40, t=40, b=80),
+                uniformtext_minsize=BAR_LABEL_SIZE,
+                uniformtext_mode="show",
                 font=dict(size=BODY_TEXT_SIZE, color="black"),
-            ),
-        )
-
-        st.plotly_chart(fig_compare, use_container_width=True)
-
-        st.markdown("### 상세 비교")
-        st.caption("같은 지표의 두 선수 값을 바로 옆에 배치했습니다.")
-
-        attempts_table = pd.DataFrame(
-            {
-                "상황": compare_df["상황"],
-                selected_player_a: compare_df["공격시도_A"].astype(int),
-                selected_player_b: compare_df["공격시도_B"].astype(int),
-            }
-        )
-        success_table = pd.DataFrame(
-            {
-                "상황": compare_df["상황"],
-                selected_player_a: compare_df["공격성공률_%_A"].round(1),
-                selected_player_b: compare_df["공격성공률_%_B"].round(1),
-            }
-        )
-        efficiency_table = pd.DataFrame(
-            {
-                "상황": compare_df["상황"],
-                selected_player_a: compare_df["공격효율_%_A"].round(1),
-                selected_player_b: compare_df["공격효율_%_B"].round(1),
-            }
-        )
-
-        compact_height = 58 + 54 * len(compare_df) + 8
-        t1, t2, t3 = st.columns(3)
-
-        with t1:
-            st.markdown("#### 공격 시도")
-            st.dataframe(
-                attempts_table,
-                use_container_width=True,
-                hide_index=True,
-                height=compact_height,
-            )
-        with t2:
-            st.markdown("#### 공격 성공률")
-            st.dataframe(
-                success_table,
-                use_container_width=True,
-                hide_index=True,
-                height=compact_height,
-                column_config={
-                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
-                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
-                },
-            )
-        with t3:
-            st.markdown("#### 공격 효율")
-            st.dataframe(
-                efficiency_table,
-                use_container_width=True,
-                hide_index=True,
-                height=compact_height,
-                column_config={
-                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
-                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
-                },
+                xaxis=dict(
+                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                    showline=True,
+                    linecolor="black",
+                ),
+                yaxis=dict(
+                    range=[0, max_compare_rate + 14],
+                    ticksuffix="%",
+                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                    title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+                    showgrid=True,
+                    gridcolor="rgba(0,0,0,0.12)",
+                    showline=True,
+                    linecolor="black",
+                ),
+                legend=dict(
+                    title_text="",
+                    font=dict(size=BODY_TEXT_SIZE, color="black"),
+                ),
             )
 
-    # ------------------------------
-    # 리시브 비교
-    # ------------------------------
-    receive_compare_base = receives[
-        receives["시즌코드"].astype(str)
-        == str(selected_season_code)
-    ].copy()
+            st.plotly_chart(fig_compare, use_container_width=True)
 
-    receive_compare_base = apply_receive_scope(
-        receive_compare_base,
-        selected_scope,
-        selected_game_key,
-    )
+            st.markdown("### 상세 비교")
+            st.caption("같은 지표의 두 선수 값을 바로 옆에 배치했습니다.")
 
-    player_a_receive = receive_compare_base[
-        (receive_compare_base["팀코드"].astype(str) == str(a_team_code))
-        & (receive_compare_base["선수"].astype(str) == selected_player_a)
-    ].copy()
+            attempts_table = pd.DataFrame(
+                {
+                    "상황": compare_df["상황"],
+                    selected_player_a: compare_df["공격시도_A"].astype(int),
+                    selected_player_b: compare_df["공격시도_B"].astype(int),
+                }
+            )
+            success_table = pd.DataFrame(
+                {
+                    "상황": compare_df["상황"],
+                    selected_player_a: compare_df["공격성공률_%_A"].round(1),
+                    selected_player_b: compare_df["공격성공률_%_B"].round(1),
+                }
+            )
+            efficiency_table = pd.DataFrame(
+                {
+                    "상황": compare_df["상황"],
+                    selected_player_a: compare_df["공격효율_%_A"].round(1),
+                    selected_player_b: compare_df["공격효율_%_B"].round(1),
+                }
+            )
 
-    player_b_receive = receive_compare_base[
-        (receive_compare_base["팀코드"].astype(str) == str(b_team_code))
-        & (receive_compare_base["선수"].astype(str) == selected_player_b)
-    ].copy()
+            compact_height = 58 + 54 * len(compare_df) + 8
+            t1, t2, t3 = st.columns(3)
 
-    if player_a_receive.empty and player_b_receive.empty:
-        st.info("선택한 범위에서 두 선수의 리시브 기록은 없습니다.")
+            with t1:
+                st.markdown("#### 공격 시도")
+                st.dataframe(
+                    attempts_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=compact_height,
+                )
+            with t2:
+                st.markdown("#### 공격 성공률")
+                st.dataframe(
+                    success_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=compact_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                        selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                    },
+                )
+            with t3:
+                st.markdown("#### 공격 효율")
+                st.dataframe(
+                    efficiency_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=compact_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                        selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                    },
+                )
+
     else:
-        st.divider()
-        st.subheader("리시브 비교")
-        st.caption(
-            "점수차 기준은 리시브가 발생한 랠리 시작 직전 점수입니다. "
-            "'3점차 이내'는 세트 진행 시점과 관계없이 적용합니다."
+        # ------------------------------
+        # 리시브 비교
+        # ------------------------------
+        receive_compare_base = receives[
+            receives["시즌코드"].astype(str)
+            == str(selected_season_code)
+        ].copy()
+
+        receive_compare_base = apply_receive_scope(
+            receive_compare_base,
+            selected_scope,
+            selected_game_key,
         )
 
-        a_receive_summary = receive_comparison_rows(player_a_receive)
-        b_receive_summary = receive_comparison_rows(player_b_receive)
+        player_a_receive = receive_compare_base[
+            (receive_compare_base["팀코드"].astype(str) == str(a_team_code))
+            & (receive_compare_base["선수"].astype(str) == selected_player_a)
+        ].copy()
 
-        receive_compare_df = a_receive_summary.merge(
-            b_receive_summary,
-            on="상황",
-            how="outer",
-            suffixes=("_A", "_B"),
-        ).fillna(0)
+        player_b_receive = receive_compare_base[
+            (receive_compare_base["팀코드"].astype(str) == str(b_team_code))
+            & (receive_compare_base["선수"].astype(str) == selected_player_b)
+        ].copy()
 
-        receive_graph_rows = []
-        for _, row in receive_compare_df.iterrows():
-            receive_graph_rows.extend(
-                [
-                    {
-                        "상황": row["상황"],
-                        "선수": selected_player_a,
-                        "리시브효율_%": row["리시브효율_%_A"],
-                        "리시브시도": int(row["리시브시도_A"]),
-                    },
-                    {
-                        "상황": row["상황"],
-                        "선수": selected_player_b,
-                        "리시브효율_%": row["리시브효율_%_B"],
-                        "리시브시도": int(row["리시브시도_B"]),
-                    },
-                ]
+        if player_a_receive.empty and player_b_receive.empty:
+            st.info("선택한 범위에서 두 선수의 리시브 기록은 없습니다.")
+        else:
+            st.divider()
+            st.subheader("리시브 비교")
+            st.caption(
+                "점수차 기준은 리시브가 발생한 랠리 시작 직전 점수입니다. "
+                "'3점차 이내'는 세트 진행 시점과 관계없이 적용합니다."
             )
 
-        receive_graph_df = pd.DataFrame(receive_graph_rows)
-        receive_graph_df["표시"] = receive_graph_df.apply(
-            lambda row: (
-                f"{row['리시브효율_%']:.1f}%"
-                f"<br>({int(row['리시브시도']):,}회)"
-            ),
-            axis=1,
-        )
+            a_receive_summary = receive_comparison_rows(player_a_receive)
+            b_receive_summary = receive_comparison_rows(player_b_receive)
 
-        fig_receive_compare = px.bar(
-            receive_graph_df,
-            x="상황",
-            y="리시브효율_%",
-            color="선수",
-            text="표시",
-            barmode="group",
-            color_discrete_map={
-                selected_player_a: a_color,
-                selected_player_b: b_color,
-            },
-            custom_data=["리시브시도"],
-            labels={
-                "상황": "",
-                "리시브효율_%": "리시브 효율 (%)",
-                "선수": "",
-                "표시": "",
-            },
-        )
+            receive_compare_df = a_receive_summary.merge(
+                b_receive_summary,
+                on="상황",
+                how="outer",
+                suffixes=("_A", "_B"),
+            ).fillna(0)
 
-        fig_receive_compare.update_traces(
-            textposition="outside",
-            cliponaxis=False,
-            textfont=dict(size=14, color="black"),
-            hovertemplate=(
-                "%{x}<br>%{fullData.name}<br>"
-                "리시브 효율 %{y:.1f}%<br>"
-                "리시브 시도 %{customdata[0]:,}회"
-                "<extra></extra>"
-            ),
-        )
+            receive_graph_rows = []
+            for _, row in receive_compare_df.iterrows():
+                receive_graph_rows.extend(
+                    [
+                        {
+                            "상황": row["상황"],
+                            "선수": selected_player_a,
+                            "리시브효율_%": row["리시브효율_%_A"],
+                            "리시브시도": int(row["리시브시도_A"]),
+                        },
+                        {
+                            "상황": row["상황"],
+                            "선수": selected_player_b,
+                            "리시브효율_%": row["리시브효율_%_B"],
+                            "리시브시도": int(row["리시브시도_B"]),
+                        },
+                    ]
+                )
 
-        max_receive_rate = (
-            float(receive_graph_df["리시브효율_%"].max())
-            if not receive_graph_df.empty
-            else 0
-        )
+            receive_graph_df = pd.DataFrame(receive_graph_rows)
+            receive_graph_df["표시"] = receive_graph_df.apply(
+                lambda row: (
+                    f"{row['리시브효율_%']:.1f}%"
+                    f"<br>({int(row['리시브시도']):,}회)"
+                ),
+                axis=1,
+            )
 
-        fig_receive_compare.update_layout(
-            height=620,
-            margin=dict(l=60, r=40, t=60, b=100),
-            uniformtext_minsize=14,
-            uniformtext_mode="show",
-            bargap=0.28,
-            bargroupgap=0.10,
-            font=dict(size=BODY_TEXT_SIZE, color="black"),
-            xaxis=dict(
-                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-                showline=True,
-                linecolor="black",
-            ),
-            yaxis=dict(
-                range=[0, max_receive_rate + 20],
-                ticksuffix="%",
-                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-                title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-                showgrid=True,
-                gridcolor="rgba(0,0,0,0.12)",
-                showline=True,
-                linecolor="black",
-            ),
-            legend=dict(
-                title_text="",
+            fig_receive_compare = px.bar(
+                receive_graph_df,
+                x="상황",
+                y="리시브효율_%",
+                color="선수",
+                text="표시",
+                barmode="group",
+                color_discrete_map={
+                    selected_player_a: a_color,
+                    selected_player_b: b_color,
+                },
+                custom_data=["리시브시도"],
+                labels={
+                    "상황": "",
+                    "리시브효율_%": "리시브 효율 (%)",
+                    "선수": "",
+                    "표시": "",
+                },
+            )
+
+            fig_receive_compare.update_traces(
+                textposition="outside",
+                cliponaxis=False,
+                textfont=dict(size=14, color="black"),
+                hovertemplate=(
+                    "%{x}<br>%{fullData.name}<br>"
+                    "리시브 효율 %{y:.1f}%<br>"
+                    "리시브 시도 %{customdata[0]:,}회"
+                    "<extra></extra>"
+                ),
+            )
+
+            max_receive_rate = (
+                float(receive_graph_df["리시브효율_%"].max())
+                if not receive_graph_df.empty
+                else 0
+            )
+
+            fig_receive_compare.update_layout(
+                height=620,
+                margin=dict(l=60, r=40, t=60, b=100),
+                uniformtext_minsize=14,
+                uniformtext_mode="show",
+                bargap=0.28,
+                bargroupgap=0.10,
                 font=dict(size=BODY_TEXT_SIZE, color="black"),
-            ),
-        )
-
-        st.plotly_chart(
-            fig_receive_compare,
-            use_container_width=True,
-        )
-
-        st.markdown("### 리시브 상세 비교")
-        st.caption("같은 지표의 두 선수 값을 바로 옆에 배치했습니다.")
-
-        receive_attempts_table = pd.DataFrame(
-            {
-                "상황": receive_compare_df["상황"],
-                selected_player_a: receive_compare_df["리시브시도_A"].astype(int),
-                selected_player_b: receive_compare_df["리시브시도_B"].astype(int),
-            }
-        )
-        receive_exact_table = pd.DataFrame(
-            {
-                "상황": receive_compare_df["상황"],
-                selected_player_a: receive_compare_df["정확리시브율_%_A"].round(1),
-                selected_player_b: receive_compare_df["정확리시브율_%_B"].round(1),
-            }
-        )
-        receive_fail_table = pd.DataFrame(
-            {
-                "상황": receive_compare_df["상황"],
-                selected_player_a: receive_compare_df["실패율_%_A"].round(1),
-                selected_player_b: receive_compare_df["실패율_%_B"].round(1),
-            }
-        )
-        receive_eff_table = pd.DataFrame(
-            {
-                "상황": receive_compare_df["상황"],
-                selected_player_a: receive_compare_df["리시브효율_%_A"].round(1),
-                selected_player_b: receive_compare_df["리시브효율_%_B"].round(1),
-            }
-        )
-
-        receive_table_height = 58 + 54 * len(receive_compare_df) + 8
-        rc1, rc2 = st.columns(2)
-        rc3, rc4 = st.columns(2)
-
-        with rc1:
-            st.markdown("#### 리시브 시도")
-            st.dataframe(
-                receive_attempts_table,
-                use_container_width=True,
-                hide_index=True,
-                height=receive_table_height,
+                xaxis=dict(
+                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                    showline=True,
+                    linecolor="black",
+                ),
+                yaxis=dict(
+                    range=[0, max_receive_rate + 20],
+                    ticksuffix="%",
+                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                    title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+                    showgrid=True,
+                    gridcolor="rgba(0,0,0,0.12)",
+                    showline=True,
+                    linecolor="black",
+                ),
+                legend=dict(
+                    title_text="",
+                    font=dict(size=BODY_TEXT_SIZE, color="black"),
+                ),
             )
-        with rc2:
-            st.markdown("#### 정확 리시브율")
-            st.dataframe(
-                receive_exact_table,
+
+            st.plotly_chart(
+                fig_receive_compare,
                 use_container_width=True,
-                hide_index=True,
-                height=receive_table_height,
-                column_config={
-                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
-                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
-                },
             )
-        with rc3:
-            st.markdown("#### 리시브 실패율")
-            st.dataframe(
-                receive_fail_table,
-                use_container_width=True,
-                hide_index=True,
-                height=receive_table_height,
-                column_config={
-                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
-                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
-                },
+
+            st.markdown("### 리시브 상세 비교")
+            st.caption("같은 지표의 두 선수 값을 바로 옆에 배치했습니다.")
+
+            receive_attempts_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: receive_compare_df["리시브시도_A"].astype(int),
+                    selected_player_b: receive_compare_df["리시브시도_B"].astype(int),
+                }
             )
-        with rc4:
-            st.markdown("#### 리시브 효율")
-            st.dataframe(
-                receive_eff_table,
-                use_container_width=True,
-                hide_index=True,
-                height=receive_table_height,
-                column_config={
-                    selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
-                    selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
-                },
+            receive_exact_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: receive_compare_df["정확리시브율_%_A"].round(1),
+                    selected_player_b: receive_compare_df["정확리시브율_%_B"].round(1),
+                }
             )
+            receive_fail_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: receive_compare_df["실패율_%_A"].round(1),
+                    selected_player_b: receive_compare_df["실패율_%_B"].round(1),
+                }
+            )
+            receive_eff_table = pd.DataFrame(
+                {
+                    "상황": receive_compare_df["상황"],
+                    selected_player_a: receive_compare_df["리시브효율_%_A"].round(1),
+                    selected_player_b: receive_compare_df["리시브효율_%_B"].round(1),
+                }
+            )
+
+            receive_table_height = 58 + 54 * len(receive_compare_df) + 8
+            rc1, rc2 = st.columns(2)
+            rc3, rc4 = st.columns(2)
+
+            with rc1:
+                st.markdown("#### 리시브 시도")
+                st.dataframe(
+                    receive_attempts_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                )
+            with rc2:
+                st.markdown("#### 정확 리시브율")
+                st.dataframe(
+                    receive_exact_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                        selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                    },
+                )
+            with rc3:
+                st.markdown("#### 리시브 실패율")
+                st.dataframe(
+                    receive_fail_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                        selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                    },
+                )
+            with rc4:
+                st.markdown("#### 리시브 효율")
+                st.dataframe(
+                    receive_eff_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=receive_table_height,
+                    column_config={
+                        selected_player_a: st.column_config.NumberColumn(format="%.1f%%"),
+                        selected_player_b: st.column_config.NumberColumn(format="%.1f%%"),
+                    },
+                )
 
 
 # ==========================================
@@ -1612,321 +1621,216 @@ if (
             else 0
         )
 
-        c1, c2, c3, c4 = st.columns(4)
-
-        c1.metric(
-            "공격 시도",
-            f"{attack['공격시도']:,}회",
-        )
-        c2.metric(
-            "공격 성공률",
-            f"{attack['공격성공률_%']:.1f}%",
-        )
-        c3.metric(
-            "공격 효율",
-            f"{attack['공격효율_%']:.1f}%",
-        )
-        c4.metric(
-            "공격 점유율",
-            f"{attack_share:.1f}%",
+        individual_detail_type = st.radio(
+            "세부 지표",
+            ["공격", "리시브"],
+            horizontal=True,
+            key="individual_detail_type",
         )
 
-        r1, r2, r3 = st.columns(3)
+        if individual_detail_type == "공격":
+            c1, c2, c3, c4 = st.columns(4)
 
-        r1.metric(
-            "리시브 시도",
-            f"{receive['리시브시도']:,}회",
-        )
-        r2.metric(
-            "리시브 정확",
-            f"{receive['리시브정확']:,}회",
-        )
-        r3.metric(
-            "리시브 효율",
-            f"{receive['리시브효율_%']:.1f}%",
-        )
+            c1.metric(
+                "공격 시도",
+                f"{attack['공격시도']:,}회",
+            )
+            c2.metric(
+                "공격 성공률",
+                f"{attack['공격성공률_%']:.1f}%",
+            )
+            c3.metric(
+                "공격 효율",
+                f"{attack['공격효율_%']:.1f}%",
+            )
+            c4.metric(
+                "공격 점유율",
+                f"{attack_share:.1f}%",
+            )
 
-        st.caption(
-            "공격 효율 = (공격 성공 - 공격 범실 - 블로킹 당함) / 공격 시도. "
-            "리시브 효율 = (정확 리시브 - 리시브 실패) / 리시브 시도."
-        )
+            st.caption(
+                "공격 효율 = (공격 성공 - 공격 범실 - 블로킹 당함) / 공격 시도."
+            )
+        else:
+            r1, r2, r3, r4 = st.columns(4)
+
+            exact_rate = (
+                receive["리시브정확"] / receive["리시브시도"] * 100
+                if receive["리시브시도"]
+                else 0
+            )
+            fail_rate = (
+                receive["리시브실패"] / receive["리시브시도"] * 100
+                if receive["리시브시도"]
+                else 0
+            )
+
+            r1.metric(
+                "리시브 시도",
+                f"{receive['리시브시도']:,}회",
+            )
+            r2.metric(
+                "정확 리시브율",
+                f"{exact_rate:.1f}%",
+            )
+            r3.metric(
+                "리시브 실패율",
+                f"{fail_rate:.1f}%",
+            )
+            r4.metric(
+                "리시브 효율",
+                f"{receive['리시브효율_%']:.1f}%",
+            )
+
+            st.caption(
+                "리시브 효율 = (정확 리시브 - 리시브 실패) / 리시브 시도."
+            )
 
         player_color = get_team_color(
             player_season_code,
             player_team_code,
         )
 
-        if player_df.empty:
-            st.info(
-                "이 선수는 선택한 범위에서 공격 기록이 없어 "
-                "공격 상황별 그래프는 표시하지 않습니다."
-            )
-
-        if not player_df.empty:
-            # ------------------------------
-            # 세트별
-            # ------------------------------
-            st.divider()
-            st.subheader("세트별 공격")
-
-            set_summary = (
-                player_df
-                .groupby("세트")
-                .agg(
-                    공격시도=("공격수", "size"),
-                    공격성공=("공격성공", "sum"),
-                    공격범실=("공격범실", "sum"),
-                    블로킹당함=("블로킹당함", "sum"),
+        if individual_detail_type == "공격":
+            if player_df.empty:
+                st.info(
+                    "이 선수는 선택한 범위에서 공격 기록이 없어 "
+                    "공격 상황별 그래프는 표시하지 않습니다."
                 )
-                .reset_index()
-            )
 
-            set_summary["공격성공률_%"] = (
-                set_summary["공격성공"]
-                / set_summary["공격시도"]
-                * 100
-            )
+            if not player_df.empty:
+                # ------------------------------
+                # 세트별
+                # ------------------------------
+                st.divider()
+                st.subheader("세트별 공격")
 
-            set_summary["공격효율_%"] = (
-                (
+                set_summary = (
+                    player_df
+                    .groupby("세트")
+                    .agg(
+                        공격시도=("공격수", "size"),
+                        공격성공=("공격성공", "sum"),
+                        공격범실=("공격범실", "sum"),
+                        블로킹당함=("블로킹당함", "sum"),
+                    )
+                    .reset_index()
+                )
+
+                set_summary["공격성공률_%"] = (
                     set_summary["공격성공"]
-                    - set_summary["공격범실"]
-                    - set_summary["블로킹당함"]
-                )
-                / set_summary["공격시도"]
-                * 100
-            )
-
-            fig_set = make_rate_bar(
-                set_summary,
-                "세트",
-                "세트별 공격 성공률",
-                player_color,
-            )
-
-            fig_set.update_xaxes(
-                tickmode="linear",
-                dtick=1,
-            )
-
-            st.plotly_chart(
-                fig_set,
-                use_container_width=True,
-            )
-
-            # ------------------------------
-            # 점수대별
-            # ------------------------------
-            st.divider()
-            st.subheader("점수대별 공격")
-
-            score_order = [
-                "0점대",
-                "10점대",
-                "20점 이후",
-            ]
-
-            score_summary = (
-                player_df
-                .groupby("점수대")
-                .agg(
-                    공격시도=("공격수", "size"),
-                    공격성공=("공격성공", "sum"),
-                    공격범실=("공격범실", "sum"),
-                    블로킹당함=("블로킹당함", "sum"),
-                )
-                .reset_index()
-            )
-
-            score_summary["공격성공률_%"] = (
-                score_summary["공격성공"]
-                / score_summary["공격시도"]
-                * 100
-            )
-
-            score_summary["공격효율_%"] = (
-                (
-                    score_summary["공격성공"]
-                    - score_summary["공격범실"]
-                    - score_summary["블로킹당함"]
-                )
-                / score_summary["공격시도"]
-                * 100
-            )
-
-            score_summary["점수대"] = pd.Categorical(
-                score_summary["점수대"],
-                categories=score_order,
-                ordered=True,
-            )
-
-            score_summary = score_summary.sort_values("점수대")
-
-            fig_score = make_rate_bar(
-                score_summary,
-                "점수대",
-                "점수대별 공격 성공률",
-                player_color,
-            )
-
-            st.plotly_chart(
-                fig_score,
-                use_container_width=True,
-            )
-
-            st.caption(
-                "점수대는 공격하는 팀의 공격 직전 점수를 기준으로 구분합니다."
-            )
-
-            # ------------------------------
-            # 접전 상황
-            # ------------------------------
-            st.divider()
-            st.subheader("접전 상황 공격")
-
-            close_rows = []
-
-            plain3_mask = plain_three_point_mask(player_df)
-
-            if plain3_mask is not None:
-                close3 = player_df[plain3_mask]
-                s = attack_summary(close3)
-
-                close_rows.append(
-                    {
-                        "상황": "3점차 이내",
-                        "공격 시도": s["공격시도"],
-                        "공격 성공": s["공격성공"],
-                        "공격 성공률 (%)": round(
-                            s["공격성공률_%"],
-                            1,
-                        ),
-                        "공격 효율 (%)": round(
-                            s["공격효율_%"],
-                            1,
-                        ),
-                        "전체 공격 중 비중 (%)": round(
-                            s["공격시도"]
-                            / attack["공격시도"]
-                            * 100
-                            if attack["공격시도"]
-                            else 0,
-                            1,
-                        ),
-                    }
+                    / set_summary["공격시도"]
+                    * 100
                 )
 
-            if "후반3점차이내" in player_df.columns:
-                clutch3 = player_df[
-                    player_df["후반3점차이내"] == True
-                ]
-                s = attack_summary(clutch3)
-
-                close_rows.append(
-                    {
-                        "상황": "후반 3점차 이내",
-                        "공격 시도": s["공격시도"],
-                        "공격 성공": s["공격성공"],
-                        "공격 성공률 (%)": round(
-                            s["공격성공률_%"],
-                            1,
-                        ),
-                        "공격 효율 (%)": round(
-                            s["공격효율_%"],
-                            1,
-                        ),
-                        "전체 공격 중 비중 (%)": round(
-                            s["공격시도"]
-                            / attack["공격시도"]
-                            * 100
-                            if attack["공격시도"]
-                            else 0,
-                            1,
-                        ),
-                    }
+                set_summary["공격효율_%"] = (
+                    (
+                        set_summary["공격성공"]
+                        - set_summary["공격범실"]
+                        - set_summary["블로킹당함"]
+                    )
+                    / set_summary["공격시도"]
+                    * 100
                 )
 
-            if "후반5점차이내" in player_df.columns:
-                clutch5 = player_df[
-                    player_df["후반5점차이내"] == True
-                ]
-                s = attack_summary(clutch5)
-
-                close_rows.append(
-                    {
-                        "상황": "후반 5점차 이내",
-                        "공격 시도": s["공격시도"],
-                        "공격 성공": s["공격성공"],
-                        "공격 성공률 (%)": round(
-                            s["공격성공률_%"],
-                            1,
-                        ),
-                        "공격 효율 (%)": round(
-                            s["공격효율_%"],
-                            1,
-                        ),
-                        "전체 공격 중 비중 (%)": round(
-                            s["공격시도"]
-                            / attack["공격시도"]
-                            * 100
-                            if attack["공격시도"]
-                            else 0,
-                            1,
-                        ),
-                    }
+                fig_set = make_rate_bar(
+                    set_summary,
+                    "세트",
+                    "세트별 공격 성공률",
+                    player_color,
                 )
 
-            if close_rows:
-                close_df = pd.DataFrame(close_rows)
-                st.dataframe(
-                    close_df,
+                fig_set.update_xaxes(
+                    tickmode="linear",
+                    dtick=1,
+                )
+
+                st.plotly_chart(
+                    fig_set,
                     use_container_width=True,
-                    hide_index=True,
-                    height=58 + 54 * len(close_df) + 8,
+                )
+
+                # ------------------------------
+                # 점수대별
+                # ------------------------------
+                st.divider()
+                st.subheader("점수대별 공격")
+
+                score_order = [
+                    "0점대",
+                    "10점대",
+                    "20점 이후",
+                ]
+
+                score_summary = (
+                    player_df
+                    .groupby("점수대")
+                    .agg(
+                        공격시도=("공격수", "size"),
+                        공격성공=("공격성공", "sum"),
+                        공격범실=("공격범실", "sum"),
+                        블로킹당함=("블로킹당함", "sum"),
+                    )
+                    .reset_index()
+                )
+
+                score_summary["공격성공률_%"] = (
+                    score_summary["공격성공"]
+                    / score_summary["공격시도"]
+                    * 100
+                )
+
+                score_summary["공격효율_%"] = (
+                    (
+                        score_summary["공격성공"]
+                        - score_summary["공격범실"]
+                        - score_summary["블로킹당함"]
+                    )
+                    / score_summary["공격시도"]
+                    * 100
+                )
+
+                score_summary["점수대"] = pd.Categorical(
+                    score_summary["점수대"],
+                    categories=score_order,
+                    ordered=True,
+                )
+
+                score_summary = score_summary.sort_values("점수대")
+
+                fig_score = make_rate_bar(
+                    score_summary,
+                    "점수대",
+                    "점수대별 공격 성공률",
+                    player_color,
+                )
+
+                st.plotly_chart(
+                    fig_score,
+                    use_container_width=True,
                 )
 
                 st.caption(
-                    "3점차 이내는 공격 직전 점수 기준으로 세트 진행 시점과 관계없이 "
-                    "점수차가 3점 이내인 공격입니다. 후반 3점차 이내는 1~4세트는 한 팀이라도 "
-                    "20점 이상, 5세트는 한 팀이라도 10점 이상인 후반 상황까지 함께 적용합니다."
+                    "점수대는 공격하는 팀의 공격 직전 점수를 기준으로 구분합니다."
                 )
 
-                if "후반5점차이내" not in player_df.columns:
-                    st.caption(
-                        "※ 후반 5점차 이내 지표는 현재 저장된 공격 데이터에 "
-                        "별도 플래그가 없어, 다음 원점수 데이터 갱신 때 추가합니다."
-                    )
-
-            # ------------------------------
-            # 세트 상황별
-            # ------------------------------
-            situation_cols = [
-                ("접전세트", "접전 세트"),
-                ("듀스세트", "듀스 세트"),
-                ("경기결정세트", "경기 결정 세트"),
-            ]
-
-            available_situations = [
-                item
-                for item in situation_cols
-                if item[0] in player_df.columns
-            ]
-
-            if available_situations:
+                # ------------------------------
+                # 접전 상황
+                # ------------------------------
                 st.divider()
-                st.subheader("세트 상황별 공격")
+                st.subheader("접전 상황 공격")
 
-                situation_rows = []
+                close_rows = []
 
-                for col, label in available_situations:
-                    situation_df = player_df[
-                        player_df[col] == True
-                    ]
-                    s = attack_summary(situation_df)
+                plain3_mask = plain_three_point_mask(player_df)
 
-                    situation_rows.append(
+                if plain3_mask is not None:
+                    close3 = player_df[plain3_mask]
+                    s = attack_summary(close3)
+
+                    close_rows.append(
                         {
-                            "상황": label,
+                            "상황": "3점차 이내",
                             "공격 시도": s["공격시도"],
                             "공격 성공": s["공격성공"],
                             "공격 성공률 (%)": round(
@@ -1937,167 +1841,300 @@ if (
                                 s["공격효율_%"],
                                 1,
                             ),
+                            "전체 공격 중 비중 (%)": round(
+                                s["공격시도"]
+                                / attack["공격시도"]
+                                * 100
+                                if attack["공격시도"]
+                                else 0,
+                                1,
+                            ),
                         }
                     )
 
-                situation_df = pd.DataFrame(situation_rows)
+                if "후반3점차이내" in player_df.columns:
+                    clutch3 = player_df[
+                        player_df["후반3점차이내"] == True
+                    ]
+                    s = attack_summary(clutch3)
 
-                st.dataframe(
-                    situation_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=58 + 54 * len(situation_df) + 8,
+                    close_rows.append(
+                        {
+                            "상황": "후반 3점차 이내",
+                            "공격 시도": s["공격시도"],
+                            "공격 성공": s["공격성공"],
+                            "공격 성공률 (%)": round(
+                                s["공격성공률_%"],
+                                1,
+                            ),
+                            "공격 효율 (%)": round(
+                                s["공격효율_%"],
+                                1,
+                            ),
+                            "전체 공격 중 비중 (%)": round(
+                                s["공격시도"]
+                                / attack["공격시도"]
+                                * 100
+                                if attack["공격시도"]
+                                else 0,
+                                1,
+                            ),
+                        }
+                    )
+
+                if "후반5점차이내" in player_df.columns:
+                    clutch5 = player_df[
+                        player_df["후반5점차이내"] == True
+                    ]
+                    s = attack_summary(clutch5)
+
+                    close_rows.append(
+                        {
+                            "상황": "후반 5점차 이내",
+                            "공격 시도": s["공격시도"],
+                            "공격 성공": s["공격성공"],
+                            "공격 성공률 (%)": round(
+                                s["공격성공률_%"],
+                                1,
+                            ),
+                            "공격 효율 (%)": round(
+                                s["공격효율_%"],
+                                1,
+                            ),
+                            "전체 공격 중 비중 (%)": round(
+                                s["공격시도"]
+                                / attack["공격시도"]
+                                * 100
+                                if attack["공격시도"]
+                                else 0,
+                                1,
+                            ),
+                        }
+                    )
+
+                if close_rows:
+                    close_df = pd.DataFrame(close_rows)
+                    st.dataframe(
+                        close_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=58 + 54 * len(close_df) + 8,
+                    )
+
+                    st.caption(
+                        "3점차 이내는 공격 직전 점수 기준으로 세트 진행 시점과 관계없이 "
+                        "점수차가 3점 이내인 공격입니다. 후반 3점차 이내는 1~4세트는 한 팀이라도 "
+                        "20점 이상, 5세트는 한 팀이라도 10점 이상인 후반 상황까지 함께 적용합니다."
+                    )
+
+                    if "후반5점차이내" not in player_df.columns:
+                        st.caption(
+                            "※ 후반 5점차 이내 지표는 현재 저장된 공격 데이터에 "
+                            "별도 플래그가 없어, 다음 원점수 데이터 갱신 때 추가합니다."
+                        )
+
+                # ------------------------------
+                # 세트 상황별
+                # ------------------------------
+                situation_cols = [
+                    ("접전세트", "접전 세트"),
+                    ("듀스세트", "듀스 세트"),
+                    ("경기결정세트", "경기 결정 세트"),
+                ]
+
+                available_situations = [
+                    item
+                    for item in situation_cols
+                    if item[0] in player_df.columns
+                ]
+
+                if available_situations:
+                    st.divider()
+                    st.subheader("세트 상황별 공격")
+
+                    situation_rows = []
+
+                    for col, label in available_situations:
+                        situation_df = player_df[
+                            player_df[col] == True
+                        ]
+                        s = attack_summary(situation_df)
+
+                        situation_rows.append(
+                            {
+                                "상황": label,
+                                "공격 시도": s["공격시도"],
+                                "공격 성공": s["공격성공"],
+                                "공격 성공률 (%)": round(
+                                    s["공격성공률_%"],
+                                    1,
+                                ),
+                                "공격 효율 (%)": round(
+                                    s["공격효율_%"],
+                                    1,
+                                ),
+                            }
+                        )
+
+                    situation_df = pd.DataFrame(situation_rows)
+
+                    st.dataframe(
+                        situation_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=58 + 54 * len(situation_df) + 8,
+                    )
+
+
+        else:
+            # ------------------------------
+            # 리시브 상황별 분석
+            # ------------------------------
+            if not player_receive_df.empty:
+                st.divider()
+                st.subheader("상황별 리시브")
+
+                st.caption(
+                    "점수차 기준은 리시브가 발생한 랠리 시작 직전 점수입니다. "
+                    "'3점차 이내'는 세트 진행 시점과 관계없이 적용합니다."
                 )
 
+                receive_situation = receive_comparison_rows(
+                    player_receive_df
+                )
 
-        # ------------------------------
-        # 리시브 상황별 분석
-        # ------------------------------
-        if not player_receive_df.empty:
-            st.divider()
-            st.subheader("상황별 리시브")
+                fig_receive_individual = px.bar(
+                    receive_situation,
+                    x="상황",
+                    y="리시브효율_%",
+                    text=[
+                        f"{rate:.1f}%<br>{int(attempt):,}회"
+                        for rate, attempt in zip(
+                            receive_situation["리시브효율_%"],
+                            receive_situation["리시브시도"],
+                        )
+                    ],
+                    custom_data=[
+                        "리시브시도",
+                        "리시브정확",
+                        "리시브실패",
+                        "정확리시브율_%",
+                        "실패율_%",
+                    ],
+                    labels={
+                        "상황": "",
+                        "리시브효율_%": "리시브 효율 (%)",
+                    },
+                )
 
-            st.caption(
-                "점수차 기준은 리시브가 발생한 랠리 시작 직전 점수입니다. "
-                "'3점차 이내'는 세트 진행 시점과 관계없이 적용합니다."
-            )
-
-            receive_situation = receive_comparison_rows(
-                player_receive_df
-            )
-
-            fig_receive_individual = px.bar(
-                receive_situation,
-                x="상황",
-                y="리시브효율_%",
-                text=[
-                    f"{rate:.1f}%<br>{int(attempt):,}회"
-                    for rate, attempt in zip(
-                        receive_situation["리시브효율_%"],
-                        receive_situation["리시브시도"],
-                    )
-                ],
-                custom_data=[
-                    "리시브시도",
-                    "리시브정확",
-                    "리시브실패",
-                    "정확리시브율_%",
-                    "실패율_%",
-                ],
-                labels={
-                    "상황": "",
-                    "리시브효율_%": "리시브 효율 (%)",
-                },
-            )
-
-            fig_receive_individual.update_traces(
-                marker_color=player_color,
-                textposition="outside",
-                cliponaxis=False,
-                textfont=dict(
-                    size=14,
-                    color="black",
-                ),
-                hovertemplate=(
-                    "%{x}<br>"
-                    "리시브 효율 %{y:.1f}%<br>"
-                    "리시브 시도 %{customdata[0]:,}회<br>"
-                    "정확 %{customdata[1]:,}회<br>"
-                    "실패 %{customdata[2]:,}회<br>"
-                    "정확 리시브율 %{customdata[3]:.1f}%<br>"
-                    "실패율 %{customdata[4]:.1f}%"
-                    "<extra></extra>"
-                ),
-            )
-
-            max_individual_receive = (
-                float(receive_situation["리시브효율_%"].max())
-                if not receive_situation.empty
-                else 0
-            )
-
-            fig_receive_individual.update_layout(
-                height=600,
-                margin=dict(l=60, r=40, t=50, b=100),
-                bargap=0.32,
-                font=dict(
-                    size=BODY_TEXT_SIZE,
-                    color="black",
-                ),
-                xaxis=dict(
-                    tickfont=dict(
-                        size=AXIS_TICK_SIZE,
+                fig_receive_individual.update_traces(
+                    marker_color=player_color,
+                    textposition="outside",
+                    cliponaxis=False,
+                    textfont=dict(
+                        size=14,
                         color="black",
                     ),
-                    showline=True,
-                    linecolor="black",
-                ),
-                yaxis=dict(
-                    range=[0, max_individual_receive + 18],
-                    ticksuffix="%",
-                    tickfont=dict(
-                        size=AXIS_TICK_SIZE,
+                    hovertemplate=(
+                        "%{x}<br>"
+                        "리시브 효율 %{y:.1f}%<br>"
+                        "리시브 시도 %{customdata[0]:,}회<br>"
+                        "정확 %{customdata[1]:,}회<br>"
+                        "실패 %{customdata[2]:,}회<br>"
+                        "정확 리시브율 %{customdata[3]:.1f}%<br>"
+                        "실패율 %{customdata[4]:.1f}%"
+                        "<extra></extra>"
+                    ),
+                )
+
+                max_individual_receive = (
+                    float(receive_situation["리시브효율_%"].max())
+                    if not receive_situation.empty
+                    else 0
+                )
+
+                fig_receive_individual.update_layout(
+                    height=600,
+                    margin=dict(l=60, r=40, t=50, b=100),
+                    bargap=0.32,
+                    font=dict(
+                        size=BODY_TEXT_SIZE,
                         color="black",
                     ),
-                    title_font=dict(
-                        size=AXIS_TITLE_SIZE,
-                        color="black",
+                    xaxis=dict(
+                        tickfont=dict(
+                            size=AXIS_TICK_SIZE,
+                            color="black",
+                        ),
+                        showline=True,
+                        linecolor="black",
                     ),
-                    showgrid=True,
-                    gridcolor="rgba(0,0,0,0.12)",
-                    showline=True,
-                    linecolor="black",
-                ),
-                showlegend=False,
-            )
+                    yaxis=dict(
+                        range=[0, max_individual_receive + 18],
+                        ticksuffix="%",
+                        tickfont=dict(
+                            size=AXIS_TICK_SIZE,
+                            color="black",
+                        ),
+                        title_font=dict(
+                            size=AXIS_TITLE_SIZE,
+                            color="black",
+                        ),
+                        showgrid=True,
+                        gridcolor="rgba(0,0,0,0.12)",
+                        showline=True,
+                        linecolor="black",
+                    ),
+                    showlegend=False,
+                )
 
-            st.plotly_chart(
-                fig_receive_individual,
-                use_container_width=True,
-            )
+                st.plotly_chart(
+                    fig_receive_individual,
+                    use_container_width=True,
+                )
 
-            st.markdown("### 리시브 상세")
+                st.markdown("### 리시브 상세")
 
-            receive_detail = receive_situation[
-                [
+                receive_detail = receive_situation[
+                    [
+                        "상황",
+                        "리시브시도",
+                        "리시브정확",
+                        "리시브실패",
+                        "정확리시브율_%",
+                        "실패율_%",
+                        "리시브효율_%",
+                    ]
+                ].copy()
+
+                receive_detail.columns = [
                     "상황",
-                    "리시브시도",
-                    "리시브정확",
-                    "리시브실패",
-                    "정확리시브율_%",
-                    "실패율_%",
-                    "리시브효율_%",
+                    "리시브 시도",
+                    "리시브 정확",
+                    "리시브 실패",
+                    "정확 리시브율 (%)",
+                    "실패율 (%)",
+                    "리시브 효율 (%)",
                 ]
-            ].copy()
 
-            receive_detail.columns = [
-                "상황",
-                "리시브 시도",
-                "리시브 정확",
-                "리시브 실패",
-                "정확 리시브율 (%)",
-                "실패율 (%)",
-                "리시브 효율 (%)",
-            ]
+                for col in [
+                    "정확 리시브율 (%)",
+                    "실패율 (%)",
+                    "리시브 효율 (%)",
+                ]:
+                    receive_detail[col] = receive_detail[col].round(1)
 
-            for col in [
-                "정확 리시브율 (%)",
-                "실패율 (%)",
-                "리시브 효율 (%)",
-            ]:
-                receive_detail[col] = receive_detail[col].round(1)
-
-            st.dataframe(
-                receive_detail,
-                use_container_width=True,
-                hide_index=True,
-                height=58 + 54 * len(receive_detail) + 8,
-                column_config={
-                    "정확 리시브율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
-                    "실패율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
-                    "리시브 효율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
-                },
-            )
+                st.dataframe(
+                    receive_detail,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=58 + 54 * len(receive_detail) + 8,
+                    column_config={
+                        "정확 리시브율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                        "실패율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                        "리시브 효율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                    },
+                )
 
 
 
@@ -2280,9 +2317,9 @@ if analysis_mode == "개별 선수":
             )
 
             top10_height = (
-                44
-                + 35 * len(receive_table)
-                + 6
+                52
+                + 42 * len(receive_table)
+                + 12
             )
 
             st.dataframe(
@@ -2359,9 +2396,9 @@ if analysis_mode == "개별 선수":
             attack_table[col] = attack_table[col].round(1)
 
         top10_height = (
-            44
-            + 35 * len(attack_table)
-            + 6
+            52
+            + 42 * len(attack_table)
+            + 12
         )
 
         st.dataframe(
