@@ -680,6 +680,13 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
         receive_team = receive_team[
             receive_team["팀코드"].astype(str) == str(selected_team_code)
         ]
+
+        # final 리시브 데이터에도 대회구분이 있으므로 merge 시 _x/_y로 바뀌지 않도록
+        # 라운드 판별에 필요한 경기 메타 열은 공격 데이터 쪽 값을 명시적으로 사용한다.
+        for col in ["대회구분", "경기구분"]:
+            if col in receive_team.columns:
+                receive_team = receive_team.drop(columns=[col])
+
         receive_team = receive_team.merge(
             match_meta,
             on=["경기번호", "팀코드"],
