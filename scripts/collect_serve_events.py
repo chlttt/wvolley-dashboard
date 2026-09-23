@@ -61,12 +61,11 @@ def main():
     if len(women_teams) != 7:
         raise RuntimeError(f"Women's-team validation failed: expected 7 teams, got {women_teams}")
 
-    game_col = "경기번호"
-    if game_col not in games.columns:
-        raise RuntimeError(f"{game_col} is missing from games data")
-
+    # Use the already validated women's event table as the source of game IDs.
+    # games_2526_all uses the raw schedule schema, while season_routes has the
+    # normalized 경기번호 used throughout the dashboard.
     game_nos = []
-    for value in games[game_col].dropna().unique():
+    for value in routes["경기번호"].dropna().unique():
         gnum = normalize_game_no(value)
         if gnum and gnum not in game_nos:
             game_nos.append(gnum)
