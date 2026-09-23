@@ -35,22 +35,24 @@ st.markdown(
 def load_data():
     routes = pd.read_parquet("routes_3touch_2526.parquet")
     games = pd.read_parquet("games_2526_all.parquet")
+    season_routes = pd.read_parquet("season_routes_2526.parquet")
     for c in ["공격성공", "공격범실", "블로킹당함"]:
         routes[c] = routes[c].fillna(False).astype(bool)
-    return routes, games
+    return routes, games, season_routes
 
-routes, games = load_data()
+routes, games, season_routes = load_data()
 
-def season_label_map(routes, games):
+def season_label_map(routes, games, season_routes):
     mapping = {}
+    if "시즌코드" in season_routes.columns and "시즌명" in season_routes.columns:
+        tmp = season_routes[["시즌코드", "시즌명"]].dropna().drop_duplicates()
+        mapping.update(dict(zip(tmp["시즌코드"].astype(str), tmp["시즌명"].astype(str))))
     if "시즌코드" in games.columns and "시즌명" in games.columns:
         tmp = games[["시즌코드", "시즌명"]].dropna().drop_duplicates()
         mapping.update(dict(zip(tmp["시즌코드"].astype(str), tmp["시즌명"].astype(str))))
     if "시즌코드" in routes.columns and "시즌명" in routes.columns:
         tmp = routes[["시즌코드", "시즌명"]].dropna().drop_duplicates()
         mapping.update(dict(zip(tmp["시즌코드"].astype(str), tmp["시즌명"].astype(str))))
-    # Current dataset fallback: never expose the internal API season code to users.
-    mapping.setdefault("022", "2025-26")
     return mapping
 
 def apply_scope(df, scope):
@@ -74,7 +76,7 @@ def summarize(df):
     b = int(df["블로킹당함"].sum()) if n else 0
     return n, (s / n * 100 if n else 0), ((s-e-b) / n * 100 if n else 0)
 
-labels = season_label_map(routes, games)
+labels = season_label_map(routes, games, season_routes)
 season_codes = sorted(routes["시즌코드"].dropna().astype(str).unique(), reverse=True)
 
 st.title("루트 분석")
