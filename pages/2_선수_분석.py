@@ -1230,7 +1230,7 @@ if (
             fig_compare.update_traces(
                 textposition="outside",
                 cliponaxis=False,
-                textfont=dict(size=BAR_LABEL_SIZE, color="black"),
+                textfont=dict(size=13, color="black"),
                 hovertemplate=(
                     "%{x}<br>%{fullData.name}<br>"
                     "공격 성공률 %{y:.1f}%<br>"
@@ -1246,10 +1246,12 @@ if (
             )
 
             fig_compare.update_layout(
-                height=560,
-                margin=dict(l=60, r=40, t=40, b=80),
-                uniformtext_minsize=BAR_LABEL_SIZE,
+                height=590,
+                margin=dict(l=60, r=40, t=55, b=90),
+                uniformtext_minsize=13,
                 uniformtext_mode="show",
+                bargap=0.30,
+                bargroupgap=0.16,
                 font=dict(size=BODY_TEXT_SIZE, color="black"),
                 xaxis=dict(
                     tickfont=dict(size=16, color="black"),
@@ -1257,7 +1259,7 @@ if (
                     linecolor="black",
                 ),
                 yaxis=dict(
-                    range=[0, max_compare_rate + 14],
+                    range=[0, max_compare_rate + 18],
                     ticksuffix="%",
                     tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
                     title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
@@ -1431,7 +1433,7 @@ if (
             fig_receive_compare.update_traces(
                 textposition="outside",
                 cliponaxis=False,
-                textfont=dict(size=14, color="black"),
+                textfont=dict(size=13, color="black"),
                 hovertemplate=(
                     "%{x}<br>%{fullData.name}<br>"
                     "리시브 효율 %{y:.1f}%<br>"
@@ -1449,10 +1451,10 @@ if (
             fig_receive_compare.update_layout(
                 height=620,
                 margin=dict(l=60, r=40, t=60, b=100),
-                uniformtext_minsize=14,
+                uniformtext_minsize=13,
                 uniformtext_mode="show",
-                bargap=0.28,
-                bargroupgap=0.10,
+                bargap=0.30,
+                bargroupgap=0.16,
                 font=dict(size=BODY_TEXT_SIZE, color="black"),
                 xaxis=dict(
                     tickfont=dict(size=16, color="black"),
