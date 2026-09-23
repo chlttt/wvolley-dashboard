@@ -230,6 +230,124 @@ fig_p.update_layout(height=600,showlegend=False,margin=dict(l=20,r=130,t=30,b=40
 st.plotly_chart(fig_p,use_container_width=True)
 st.caption("막대는 조합이 기록된 횟수이며, 막대 끝의 %는 해당 조합 뒤 공격 성공률입니다.")
 
+st.markdown("### 연결선수별 공격수 성공률")
+st.caption("연결선수를 선택하면 해당 선수의 연결 이후 공격수를 공격 성공률 순으로 비교합니다.")
+
+connector_options = sorted(
+    filtered["연결선수"].dropna().astype(str).unique().tolist()
+)
+if connector_options:
+    fc1, fc2 = st.columns([2, 1])
+    with fc1:
+        selected_connector = st.selectbox(
+            "연결선수",
+            connector_options,
+            key="route_connector_detail",
+        )
+    connector_base = filtered[
+        filtered["연결선수"].astype(str) == selected_connector
+    ].copy()
+    max_connection_count = max(
+        int(connector_base.groupby("공격수").size().max()),
+        1,
+    )
+    default_min_connection = min(30, max_connection_count)
+    with fc2:
+        min_connection_count = st.number_input(
+            "최소 연결 수",
+            min_value=1,
+            max_value=max_connection_count,
+            value=default_min_connection,
+            step=1,
+            key="route_min_connection_count",
+        )
+
+    connector_attackers = (
+        connector_base.dropna(subset=["공격수"])
+        .groupby("공격수")
+        .agg(
+            연결수=("공격수", "size"),
+            공격성공=("공격성공", "sum"),
+            공격범실=("공격범실", "sum"),
+            블로킹당함=("블로킹당함", "sum"),
+        )
+        .reset_index()
+    )
+    connector_attackers["공격성공률_%"] = (
+        connector_attackers["공격성공"] / connector_attackers["연결수"] * 100
+    )
+    connector_attackers["공격효율_%"] = (
+        connector_attackers["공격성공"]
+        - connector_attackers["공격범실"]
+        - connector_attackers["블로킹당함"]
+    ) / connector_attackers["연결수"] * 100
+    connector_attackers = connector_attackers[
+        connector_attackers["연결수"] >= min_connection_count
+    ].sort_values(
+        ["공격성공률_%", "연결수"],
+        ascending=[False, False],
+    )
+
+    if connector_attackers.empty:
+        st.info("현재 최소 연결 수 기준을 충족하는 공격수가 없습니다.")
+    else:
+        connector_chart = connector_attackers.sort_values(
+            ["공격성공률_%", "연결수"],
+            ascending=[True, True],
+        )
+        fig_connector_attackers = px.bar(
+            connector_chart,
+            x="공격성공률_%",
+            y="공격수",
+            orientation="h",
+            text=[
+                f"{rate:.1f}% | {count:,}회"
+                for rate, count in zip(
+                    connector_chart["공격성공률_%"],
+                    connector_chart["연결수"],
+                )
+            ],
+            custom_data=["연결수", "공격효율_%"],
+            labels={
+                "공격성공률_%": "공격 성공률 (%)",
+                "공격수": "",
+            },
+        )
+        fig_connector_attackers.update_traces(
+            textposition="outside",
+            cliponaxis=False,
+            textfont=dict(size=14, color="black"),
+            hovertemplate=(
+                "%{y}<br>"
+                "공격 성공률 %{x:.1f}%<br>"
+                "연결 수 %{customdata[0]:,}회<br>"
+                "공격 효율 %{customdata[1]:.1f}%"
+                "<extra></extra>"
+            ),
+        )
+        fig_connector_attackers.update_layout(
+            height=max(360, 70 * len(connector_chart)),
+            showlegend=False,
+            margin=dict(l=20, r=130, t=30, b=45),
+            font=dict(size=BODY_TEXT_SIZE, color="black"),
+            xaxis=dict(
+                range=[0, max(connector_chart["공격성공률_%"].max() + 12, 12)],
+                ticksuffix="%",
+                tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+                gridcolor="rgba(0,0,0,0.12)",
+            ),
+            yaxis=dict(tickfont=dict(size=15, color="black")),
+        )
+        st.plotly_chart(fig_connector_attackers, use_container_width=True)
+        st.caption(
+            f"{selected_connector}의 연결이 최소 {min_connection_count:,}회 이상 기록된 공격수만 표시합니다. "
+            "정렬은 공격 성공률이 높은 순입니다."
+        )
+else:
+    st.info("선택한 조건에서 연결선수 기록이 없습니다.")
+
+
 st.divider()
 st.subheader("특수 루트")
 special=[]
