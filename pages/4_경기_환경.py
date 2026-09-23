@@ -90,11 +90,32 @@ st.caption("휴식일수, 홈·원정, 직전 경기장 간 직선거리와 경�
 
 season_col = "시즌명" if "시즌명" in schedule.columns else "시즌코드"
 
+season_labels = {}
+if "시즌코드" in schedule.columns and "시즌명" in schedule.columns:
+    season_pairs = schedule[["시즌코드", "시즌명"]].dropna().drop_duplicates()
+    season_labels.update(
+        dict(zip(season_pairs["시즌코드"].astype(str), season_pairs["시즌명"].astype(str)))
+    )
+season_labels.setdefault("022", "2025-26")
+
 with st.sidebar:
     st.header("경기 환경 필터")
-    seasons = sorted(schedule[season_col].dropna().astype(str).unique(), reverse=True)
-    selected_season = st.selectbox("시즌", seasons)
-    season_schedule = schedule[schedule[season_col].astype(str) == selected_season].copy()
+    if "시즌코드" in schedule.columns:
+        seasons = sorted(schedule["시즌코드"].dropna().astype(str).unique(), reverse=True)
+        selected_season = st.selectbox(
+            "시즌",
+            seasons,
+            format_func=lambda x: season_labels.get(str(x), str(x)),
+        )
+        season_schedule = schedule[
+            schedule["시즌코드"].astype(str) == str(selected_season)
+        ].copy()
+    else:
+        seasons = sorted(schedule[season_col].dropna().astype(str).unique(), reverse=True)
+        selected_season = st.selectbox("시즌", seasons)
+        season_schedule = schedule[
+            schedule[season_col].astype(str) == str(selected_season)
+        ].copy()
 
     teams = ["전체 팀"] + sorted(season_schedule["팀"].dropna().astype(str).unique())
     selected_team = st.selectbox("팀", teams)
