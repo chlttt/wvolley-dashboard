@@ -165,10 +165,6 @@ st.caption(
 )
 
 # Join team-match environment to attack events using robust common keys.
-env_cols = ["시즌코드", "경기번호", "팀코드", "팀"]
-for col in [rest_col, distance_col, home_col]:
-    if col and col not in env_cols:
-        env_cols.append(col)
 join_keys = [
     col for col in ["시즌코드", "경기번호", "팀코드"]
     if col in filtered_schedule.columns and col in routes.columns
@@ -178,6 +174,13 @@ if len(join_keys) < 2:
         col for col in ["시즌코드", "경기번호", "팀"]
         if col in filtered_schedule.columns and col in routes.columns
     ]
+
+# Merge에는 실제로 존재하는 열만 사용하고, 팀/팀코드처럼 join key가 아닌
+# 중복 식별 열은 제외한다. 그래야 팀 선택 시 환경 열 이름이 suffix로 바뀌지 않는다.
+env_cols = list(join_keys)
+for col in [rest_col, distance_col, home_col]:
+    if col and col in filtered_schedule.columns and col not in env_cols:
+        env_cols.append(col)
 
 env_match = filtered_schedule[env_cols].drop_duplicates(subset=join_keys).copy()
 attack_base = routes.copy()
