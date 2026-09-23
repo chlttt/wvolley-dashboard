@@ -1422,7 +1422,7 @@ if (
         fig_receive_compare.update_traces(
             textposition="outside",
             cliponaxis=False,
-            textfont=dict(size=BAR_LABEL_SIZE, color="black"),
+            textfont=dict(size=14, color="black"),
             hovertemplate=(
                 "%{x}<br>%{fullData.name}<br>"
                 "리시브 효율 %{y:.1f}%<br>"
@@ -1438,10 +1438,12 @@ if (
         )
 
         fig_receive_compare.update_layout(
-            height=560,
-            margin=dict(l=60, r=40, t=40, b=80),
-            uniformtext_minsize=BAR_LABEL_SIZE,
+            height=620,
+            margin=dict(l=60, r=40, t=60, b=100),
+            uniformtext_minsize=14,
             uniformtext_mode="show",
+            bargap=0.28,
+            bargroupgap=0.10,
             font=dict(size=BODY_TEXT_SIZE, color="black"),
             xaxis=dict(
                 tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
@@ -1449,7 +1451,7 @@ if (
                 linecolor="black",
             ),
             yaxis=dict(
-                range=[0, max_receive_rate + 14],
+                range=[0, max_receive_rate + 20],
                 ticksuffix="%",
                 tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
                 title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
@@ -1948,6 +1950,157 @@ if (
                 )
 
 
+        # ------------------------------
+        # 리시브 상황별 분석
+        # ------------------------------
+        if not player_receive_df.empty:
+            st.divider()
+            st.subheader("상황별 리시브")
+
+            st.caption(
+                "점수차 기준은 리시브가 발생한 랠리 시작 직전 점수입니다. "
+                "'3점차 이내'는 세트 진행 시점과 관계없이 적용합니다."
+            )
+
+            receive_situation = receive_comparison_rows(
+                player_receive_df
+            )
+
+            fig_receive_individual = px.bar(
+                receive_situation,
+                x="상황",
+                y="리시브효율_%",
+                text=[
+                    f"{rate:.1f}%<br>{int(attempt):,}회"
+                    for rate, attempt in zip(
+                        receive_situation["리시브효율_%"],
+                        receive_situation["리시브시도"],
+                    )
+                ],
+                custom_data=[
+                    "리시브시도",
+                    "리시브정확",
+                    "리시브실패",
+                    "정확리시브율_%",
+                    "실패율_%",
+                ],
+                labels={
+                    "상황": "",
+                    "리시브효율_%": "리시브 효율 (%)",
+                },
+            )
+
+            fig_receive_individual.update_traces(
+                marker_color=player_color,
+                textposition="outside",
+                cliponaxis=False,
+                textfont=dict(
+                    size=14,
+                    color="black",
+                ),
+                hovertemplate=(
+                    "%{x}<br>"
+                    "리시브 효율 %{y:.1f}%<br>"
+                    "리시브 시도 %{customdata[0]:,}회<br>"
+                    "정확 %{customdata[1]:,}회<br>"
+                    "실패 %{customdata[2]:,}회<br>"
+                    "정확 리시브율 %{customdata[3]:.1f}%<br>"
+                    "실패율 %{customdata[4]:.1f}%"
+                    "<extra></extra>"
+                ),
+            )
+
+            max_individual_receive = (
+                float(receive_situation["리시브효율_%"].max())
+                if not receive_situation.empty
+                else 0
+            )
+
+            fig_receive_individual.update_layout(
+                height=600,
+                margin=dict(l=60, r=40, t=50, b=100),
+                bargap=0.32,
+                font=dict(
+                    size=BODY_TEXT_SIZE,
+                    color="black",
+                ),
+                xaxis=dict(
+                    tickfont=dict(
+                        size=AXIS_TICK_SIZE,
+                        color="black",
+                    ),
+                    showline=True,
+                    linecolor="black",
+                ),
+                yaxis=dict(
+                    range=[0, max_individual_receive + 18],
+                    ticksuffix="%",
+                    tickfont=dict(
+                        size=AXIS_TICK_SIZE,
+                        color="black",
+                    ),
+                    title_font=dict(
+                        size=AXIS_TITLE_SIZE,
+                        color="black",
+                    ),
+                    showgrid=True,
+                    gridcolor="rgba(0,0,0,0.12)",
+                    showline=True,
+                    linecolor="black",
+                ),
+                showlegend=False,
+            )
+
+            st.plotly_chart(
+                fig_receive_individual,
+                use_container_width=True,
+            )
+
+            st.markdown("### 리시브 상세")
+
+            receive_detail = receive_situation[
+                [
+                    "상황",
+                    "리시브시도",
+                    "리시브정확",
+                    "리시브실패",
+                    "정확리시브율_%",
+                    "실패율_%",
+                    "리시브효율_%",
+                ]
+            ].copy()
+
+            receive_detail.columns = [
+                "상황",
+                "리시브 시도",
+                "리시브 정확",
+                "리시브 실패",
+                "정확 리시브율 (%)",
+                "실패율 (%)",
+                "리시브 효율 (%)",
+            ]
+
+            for col in [
+                "정확 리시브율 (%)",
+                "실패율 (%)",
+                "리시브 효율 (%)",
+            ]:
+                receive_detail[col] = receive_detail[col].round(1)
+
+            st.dataframe(
+                receive_detail,
+                use_container_width=True,
+                hide_index=True,
+                height=58 + 54 * len(receive_detail) + 8,
+                column_config={
+                    "정확 리시브율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                    "실패율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                    "리시브 효율 (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                },
+            )
+
+
+
 if analysis_mode == "개별 선수":
     # ==========================================
     # TOP 10
@@ -1986,6 +2139,7 @@ if analysis_mode == "개별 선수":
             "공격 시도",
             "공격 점유율",
             "리시브 시도",
+            "리시브 효율",
         ],
         key="player_top10_metric",
     )
@@ -2008,8 +2162,34 @@ if analysis_mode == "개별 선수":
     else:
         min_attack_attempts = 1
 
+    max_receive_attempts = (
+        int(
+            receive_scope
+            .groupby(["팀코드", "선수"])
+            .size()
+            .max()
+        )
+        if not receive_scope.empty
+        else 1
+    )
 
-    if ranking_type == "리시브 시도":
+    if ranking_type == "리시브 효율":
+        min_receive_attempts = st.number_input(
+            "최소 리시브 시도",
+            min_value=1,
+            max_value=max(max_receive_attempts, 1),
+            value=min(
+                default_min_attempts,
+                max(max_receive_attempts, 1),
+            ),
+            step=1,
+            key="top10_min_receive_attempts",
+        )
+    else:
+        min_receive_attempts = 1
+
+
+    if ranking_type in ["리시브 시도", "리시브 효율"]:
         receive_rank = (
             receive_scope
             .groupby(
@@ -2044,15 +2224,30 @@ if analysis_mode == "개별 선수":
                 * 100
             ).clip(lower=0)
 
-            receive_rank = (
-                receive_rank
-                .sort_values(
-                    ["리시브시도", "리시브효율_%"],
-                    ascending=[False, False],
+            if ranking_type == "리시브 효율":
+                receive_rank = receive_rank[
+                    receive_rank["리시브시도"]
+                    >= min_receive_attempts
+                ].copy()
+                receive_rank = (
+                    receive_rank
+                    .sort_values(
+                        ["리시브효율_%", "리시브시도"],
+                        ascending=[False, False],
+                    )
+                    .head(10)
+                    .reset_index(drop=True)
                 )
-                .head(10)
-                .reset_index(drop=True)
-            )
+            else:
+                receive_rank = (
+                    receive_rank
+                    .sort_values(
+                        ["리시브시도", "리시브효율_%"],
+                        ascending=[False, False],
+                    )
+                    .head(10)
+                    .reset_index(drop=True)
+                )
 
             receive_rank.index = receive_rank.index + 1
             receive_rank.index.name = "순위"
@@ -2095,6 +2290,10 @@ if analysis_mode == "개별 선수":
                 use_container_width=True,
                 height=top10_height,
             )
+            if ranking_type == "리시브 효율":
+                st.caption(
+                    f"최소 리시브 시도 {min_receive_attempts:,}회 이상 선수만 포함합니다."
+                )
         else:
             st.info("선택한 범위에 리시브 기록이 없습니다.")
 
