@@ -459,14 +459,15 @@ def add_smart_scatter_labels(
 def load_data():
     routes = pd.read_parquet("season_routes_2526.parquet")
     team_set = pd.read_parquet("team_set_summary.parquet")
+    receives = pd.read_parquet("receive_events_2526_final.parquet")
 
     for col in ["공격성공", "공격범실", "블로킹당함"]:
         if col in routes.columns:
             routes[col] = routes[col].fillna(False).astype(bool)
 
-    return routes, team_set
+    return routes, team_set, receives
 
-routes, team_set = load_data()
+routes, team_set, receives = load_data()
 
 st.title("🏐 팀 분석")
 st.caption("2025-26 V-League 여자부 팀별 공격 지표")
@@ -601,55 +602,114 @@ c4.metric("블로킹 당함", f"{blocked:,}회")
 # 여러 경기 구분을 묶어 보는 범위에서는 라운드/포스트시즌 단계별 추이를 함께 표시
 if selected_scope in ["전체", "정규리그", "포스트시즌"]:
     st.divider()
-    st.subheader("경기 구분별 공격 성공률")
+    st.subheader("경기 구분별 팀 지표")
+
+    trend_metric = st.selectbox(
+        "비교 지표",
+        [
+            "공격 성공률",
+            "공격 효율",
+            "리시브 효율",
+            "정확 리시브율",
+            "리시브 실패율",
+        ],
+        key="team_phase_metric",
+    )
 
     phase_order = [
         "1라운드", "2라운드", "3라운드",
         "4라운드", "5라운드", "6라운드",
         "준플레이오프", "플레이오프", "챔피언결정전",
     ]
-
     if selected_scope == "전체":
-        phase_source = team_base.copy()
         visible_phases = phase_order
     elif selected_scope == "정규리그":
-        phase_source = team_base[
-            team_base["대회구분"].astype(str) == "정규리그"
-        ].copy()
         visible_phases = phase_order[:6]
     else:
-        phase_source = team_base[
-            team_base["대회구분"].astype(str).isin(postseason_competitions)
-        ].copy()
         visible_phases = phase_order[6:]
 
-    def phase_name(row):
-        competition = str(row["대회구분"])
-        if competition in postseason_competitions:
-            return competition
-        if competition == "정규리그":
-            return str(row["경기구분"])
-        return None
-
-    phase_source["구간"] = phase_source.apply(phase_name, axis=1)
-    phase_source = phase_source[
-        phase_source["구간"].isin(visible_phases)
-    ].copy()
-
-    phase_summary = (
-        phase_source
-        .groupby("구간")
-        .agg(
-            공격시도=("공격수", "size"),
-            공격성공=("공격성공", "sum"),
+    def add_phase_column(df):
+        out = df.copy()
+        out["구간"] = out.apply(
+            lambda row: (
+                str(row["대회구분"])
+                if str(row["대회구분"]) in postseason_competitions
+                else str(row["경기구분"])
+                if str(row["대회구분"]) == "정규리그"
+                else None
+            ),
+            axis=1,
         )
-        .reset_index()
-    )
+        return out[out["구간"].isin(visible_phases)].copy()
 
-    if not phase_summary.empty:
-        phase_summary["공격성공률_%"] = (
-            phase_summary["공격성공"] / phase_summary["공격시도"] * 100
-        ).round(1)
+    if trend_metric in ["공격 성공률", "공격 효율"]:
+        phase_source = add_phase_column(team_base)
+        phase_summary = (
+            phase_source.groupby("구간")
+            .agg(
+                시도=("공격수", "size"),
+                성공=("공격성공", "sum"),
+                범실=("공격범실", "sum"),
+                블로킹당함=("블로킹당함", "sum"),
+            )
+            .reset_index()
+        )
+        if trend_metric == "공격 성공률":
+            phase_summary["지표값"] = phase_summary["성공"] / phase_summary["시도"] * 100
+        else:
+            phase_summary["지표값"] = (
+                phase_summary["성공"]
+                - phase_summary["범실"]
+                - phase_summary["블로킹당함"]
+            ) / phase_summary["시도"] * 100
+        sample_label = "공격 시도"
+    else:
+        # 리시브 이벤트에는 라운드/대회명이 없을 수 있으므로 공격 데이터의
+        # 경기 메타데이터를 경기번호+팀코드로 붙여 동일한 구간 기준을 사용한다.
+        meta_cols = ["경기번호", "팀코드", "대회구분", "경기구분"]
+        match_meta = (
+            season_base[meta_cols]
+            .drop_duplicates(subset=["경기번호", "팀코드"])
+            .copy()
+        )
+        receive_team = receives.copy()
+        if "시즌코드" in receive_team.columns:
+            receive_team = receive_team[
+                receive_team["시즌코드"].astype(str) == str(selected_season_code)
+            ]
+        receive_team = receive_team[
+            receive_team["팀코드"].astype(str) == str(selected_team_code)
+        ]
+        receive_team = receive_team.merge(
+            match_meta,
+            on=["경기번호", "팀코드"],
+            how="inner",
+        )
+        phase_source = add_phase_column(receive_team)
+        phase_summary = (
+            phase_source.groupby("구간")
+            .agg(
+                시도=("리시브결과", "size"),
+                정확=("리시브결과", lambda s: (s.astype(str) == "exc").sum()),
+                실패=("리시브결과", lambda s: (s.astype(str) == "fal").sum()),
+            )
+            .reset_index()
+        )
+        if trend_metric == "리시브 효율":
+            phase_summary["지표값"] = (
+                (phase_summary["정확"] - phase_summary["실패"])
+                / phase_summary["시도"] * 100
+            ).clip(lower=0)
+        elif trend_metric == "정확 리시브율":
+            phase_summary["지표값"] = phase_summary["정확"] / phase_summary["시도"] * 100
+        else:
+            phase_summary["지표값"] = phase_summary["실패"] / phase_summary["시도"] * 100
+        sample_label = "리시브 시도"
+
+    if phase_summary.empty:
+        st.info("선택한 조건에서 해당 지표 기록이 없습니다.")
+    else:
+        phase_summary["지표값"] = phase_summary["지표값"].round(1)
         phase_summary["구간"] = pd.Categorical(
             phase_summary["구간"],
             categories=visible_phases,
@@ -660,33 +720,26 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
         fig_phase = px.line(
             phase_summary,
             x="구간",
-            y="공격성공률_%",
+            y="지표값",
             markers=True,
-            custom_data=["공격시도", "공격성공"],
-            labels={
-                "구간": "",
-                "공격성공률_%": "공격 성공률 (%)",
-            },
+            custom_data=["시도"],
+            labels={"구간": "", "지표값": f"{trend_metric} (%)"},
         )
         fig_phase.update_traces(
             line=dict(color=selected_team_color, width=4),
             marker=dict(color=selected_team_color, size=11),
             text=[
-                f"{rate:.1f}%<br>({attempt:,}회)"
-                for rate, attempt in zip(
-                    phase_summary["공격성공률_%"],
-                    phase_summary["공격시도"],
-                )
+                f"{value:.1f}%<br>({attempt:,}회)"
+                for value, attempt in zip(phase_summary["지표값"], phase_summary["시도"])
             ],
             textposition="top center",
             mode="lines+markers+text",
             textfont=dict(size=16, color="black"),
             hovertemplate=(
                 "%{x}<br>"
-                "공격 성공률 %{y:.1f}%<br>"
-                "공격 시도 %{customdata[0]:,}회<br>"
-                "공격 성공 %{customdata[1]:,}회"
-                "<extra></extra>"
+                + trend_metric + " %{y:.1f}%<br>"
+                + sample_label + " %{customdata[0]:,}회"
+                + "<extra></extra>"
             ),
         )
         fig_phase.update_layout(
@@ -703,8 +756,8 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
             ),
             yaxis=dict(
                 range=[
-                    max(0, phase_summary["공격성공률_%"].min() - 8),
-                    min(100, phase_summary["공격성공률_%"].max() + 8),
+                    max(0, phase_summary["지표값"].min() - 8),
+                    min(100, phase_summary["지표값"].max() + 8),
                 ],
                 ticksuffix="%",
                 tickfont=dict(size=16, color="black"),
@@ -715,14 +768,11 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
             ),
         )
         st.plotly_chart(fig_phase, use_container_width=True)
-        if selected_scope == "전체":
-            st.caption(
-                "정규리그 1~6라운드와 해당 팀이 실제 참가한 포스트시즌 단계만 이어서 표시합니다."
-            )
-        elif selected_scope == "포스트시즌":
-            st.caption(
-                "해당 팀이 실제 참가한 포스트시즌 단계만 표시합니다."
-            )
+
+        if selected_scope in ["전체", "포스트시즌"]:
+            st.caption("포스트시즌은 해당 팀이 실제 참가한 단계만 표시합니다.")
+        if trend_metric == "리시브 효율":
+            st.caption("리시브 효율 = (정확 리시브 - 리시브 실패) / 리시브 시도 × 100")
 
 st.divider()
 
