@@ -1,5 +1,6 @@
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from team_config import get_team_color
@@ -10,342 +11,234 @@ SUBSECTION_TITLE_SIZE = 32
 BODY_TEXT_SIZE = 20
 METRIC_VALUE_SIZE = 46
 METRIC_LABEL_SIZE = 22
-BAR_LABEL_SIZE = 16
-AXIS_TITLE_SIZE = 20
+BAR_LABEL_SIZE = 15
+AXIS_TITLE_SIZE = 18
 AXIS_TICK_SIZE = 16
-CHART_TEXT_COLOR = "black"
-
 POSTSEASON = ["준플레이오프", "플레이오프", "챔피언결정전"]
 
-st.set_page_config(
-    page_title="루트 분석 | 여자배구 데이터 대시보드",
-    page_icon="🏐",
-    layout="wide",
-)
-
+st.set_page_config(page_title="루트 분석 | 여자배구 데이터 대시보드", page_icon="🏐", layout="wide")
 st.markdown(
     f"""
     <style>
-    html, body, [class*="css"] {{ color: black; font-size: {BODY_TEXT_SIZE}px; }}
-    .stMarkdown, .stCaption, .stMetric, label, p, div {{
-        color: black; font-size: {BODY_TEXT_SIZE}px;
-    }}
-    h1 {{ font-size: {PAGE_TITLE_SIZE}px !important; }}
-    h2 {{ font-size: {SECTION_TITLE_SIZE}px !important; }}
-    h3 {{ font-size: {SUBSECTION_TITLE_SIZE}px !important; }}
-    [data-testid="stMetricValue"] {{ font-size: {METRIC_VALUE_SIZE}px !important; }}
-    [data-testid="stMetricLabel"] {{ font-size: {METRIC_LABEL_SIZE}px !important; }}
+    html, body, [class*="css"] {{ color:black; font-size:{BODY_TEXT_SIZE}px; }}
+    .stMarkdown, .stCaption, .stMetric, label, p, div {{ color:black; font-size:{BODY_TEXT_SIZE}px; }}
+    h1 {{ font-size:{PAGE_TITLE_SIZE}px !important; }}
+    h2 {{ font-size:{SECTION_TITLE_SIZE}px !important; }}
+    h3 {{ font-size:{SUBSECTION_TITLE_SIZE}px !important; }}
+    [data-testid="stMetricValue"] {{ font-size:{METRIC_VALUE_SIZE}px !important; }}
+    [data-testid="stMetricLabel"] {{ font-size:{METRIC_LABEL_SIZE}px !important; }}
     </style>
-    """,
-    unsafe_allow_html=True,
+    """, unsafe_allow_html=True,
 )
 
 @st.cache_data
-def load_routes():
-    df = pd.read_parquet("routes_3touch_2526.parquet")
-    for col in ["공격성공", "공격범실", "블로킹당함"]:
-        if col in df.columns:
-            df[col] = df[col].fillna(False).astype(bool)
-    return df
+def load_data():
+    routes = pd.read_parquet("routes_3touch_2526.parquet")
+    games = pd.read_parquet("games_2526_all.parquet")
+    for c in ["공격성공", "공격범실", "블로킹당함"]:
+        routes[c] = routes[c].fillna(False).astype(bool)
+    return routes, games
 
-routes = load_routes()
+routes, games = load_data()
 
-def attack_summary(df):
-    attempts = len(df)
-    success = int(df["공격성공"].sum()) if attempts else 0
-    errors = int(df["공격범실"].sum()) if attempts else 0
-    blocked = int(df["블로킹당함"].sum()) if attempts else 0
-    return {
-        "시도": attempts,
-        "성공률": success / attempts * 100 if attempts else 0,
-        "효율": (success - errors - blocked) / attempts * 100 if attempts else 0,
-    }
+def season_label_map(routes, games):
+    mapping = {}
+    if "시즌코드" in games.columns and "시즌명" in games.columns:
+        tmp = games[["시즌코드", "시즌명"]].dropna().drop_duplicates()
+        mapping.update(dict(zip(tmp["시즌코드"].astype(str), tmp["시즌명"].astype(str))))
+    if "시즌코드" in routes.columns and "시즌명" in routes.columns:
+        tmp = routes[["시즌코드", "시즌명"]].dropna().drop_duplicates()
+        mapping.update(dict(zip(tmp["시즌코드"].astype(str), tmp["시즌명"].astype(str))))
+    # Current dataset fallback: never expose the internal API season code to users.
+    mapping.setdefault("022", "2025-26")
+    return mapping
 
-def apply_scope(df, scope, game_key=None):
-    out = df.copy()
-    if scope == "정규리그 전체":
-        out = out[out["대회구분"].astype(str) == "정규리그"]
-    elif scope == "포스트시즌 전체":
-        out = out[out["대회구분"].astype(str).isin(POSTSEASON)]
-    elif scope.endswith("라운드"):
-        out = out[
-            (out["대회구분"].astype(str) == "정규리그")
-            & (out["경기구분"].astype(str) == scope)
-        ]
-    elif scope in POSTSEASON:
-        out = out[out["대회구분"].astype(str) == scope]
-    elif scope == "개별 경기" and game_key is not None:
-        date, comp, no = game_key
-        out = out[
-            (out["경기번호"].astype(str) == str(no))
-            & (out["대회구분"].astype(str) == str(comp))
-            & (out["경기일"].astype(str).str[:10] == str(date))
-        ]
-    return out
+def apply_scope(df, scope):
+    if scope == "정규리그":
+        return df[df["대회구분"].astype(str) == "정규리그"].copy()
+    if scope == "포스트시즌":
+        return df[df["대회구분"].astype(str).isin(POSTSEASON)].copy()
+    if scope.endswith("라운드"):
+        return df[
+            (df["대회구분"].astype(str) == "정규리그")
+            & (df["경기구분"].astype(str) == scope)
+        ].copy()
+    if scope in POSTSEASON:
+        return df[df["대회구분"].astype(str) == scope].copy()
+    return df.copy()
+
+def summarize(df):
+    n = len(df)
+    s = int(df["공격성공"].sum()) if n else 0
+    e = int(df["공격범실"].sum()) if n else 0
+    b = int(df["블로킹당함"].sum()) if n else 0
+    return n, (s / n * 100 if n else 0), ((s-e-b) / n * 100 if n else 0)
+
+labels = season_label_map(routes, games)
+season_codes = sorted(routes["시즌코드"].dropna().astype(str).unique(), reverse=True)
 
 st.title("루트 분석")
-st.caption("기록으로 확인되는 기점 → 연결선수 → 공격수 흐름을 분석합니다.")
+st.caption("기록된 기점 → 연결선수 → 공격수 흐름과 이후 공격 결과를 봅니다.")
 
 with st.sidebar:
     st.header("루트 분석 필터")
-
-    season_col = "시즌명" if "시즌명" in routes.columns else "시즌코드"
-    seasons = sorted(routes[season_col].dropna().astype(str).unique(), reverse=True)
-    selected_season = st.selectbox("시즌", seasons)
-    season_df = routes[routes[season_col].astype(str) == selected_season].copy()
-
-    teams = ["전체 팀"] + sorted(season_df["팀"].dropna().astype(str).unique())
-    selected_team = st.selectbox("팀", teams)
-    team_df = season_df.copy()
-    if selected_team != "전체 팀":
-        team_df = team_df[team_df["팀"].astype(str) == selected_team]
-
-    positions = ["전체 포지션"] + sorted(
-        team_df["공격수포지션"].dropna().astype(str).unique()
+    selected_code = st.selectbox(
+        "시즌", season_codes,
+        format_func=lambda x: labels.get(str(x), str(x)),
     )
-    selected_position = st.selectbox("공격수 포지션", positions)
-    position_df = team_df.copy()
-    if selected_position != "전체 포지션":
-        position_df = position_df[
-            position_df["공격수포지션"].astype(str) == selected_position
-        ]
+    season_df = routes[routes["시즌코드"].astype(str) == str(selected_code)].copy()
 
-    players = ["전체 선수"] + sorted(position_df["공격수"].dropna().astype(str).unique())
-    selected_player = st.selectbox("공격수", players)
-    player_df = position_df.copy()
-    if selected_player != "전체 선수":
-        player_df = player_df[player_df["공격수"].astype(str) == selected_player]
+    team_options = ["전체 팀"] + sorted(season_df["팀"].dropna().astype(str).unique())
+    selected_team = st.selectbox("팀", team_options)
+    team_df = season_df if selected_team == "전체 팀" else season_df[season_df["팀"].astype(str) == selected_team]
 
-    available = set(player_df["대회구분"].dropna().astype(str).unique())
-    scopes = ["시즌 전체", "정규리그 전체"]
-    if any(x in available for x in POSTSEASON):
-        scopes.append("포스트시즌 전체")
-    scopes += [
-        x for x in ["1라운드", "2라운드", "3라운드", "4라운드", "5라운드", "6라운드"]
-        if x in set(player_df["경기구분"].dropna().astype(str).unique())
-    ]
-    scopes += [x for x in POSTSEASON if x in available]
-    scopes.append("개별 경기")
+    comps = set(team_df["대회구분"].dropna().astype(str).unique())
+    rounds = set(team_df["경기구분"].dropna().astype(str).unique())
+    scopes = ["시즌 전체", "정규리그"]
+    if any(x in comps for x in POSTSEASON):
+        scopes.append("포스트시즌")
+    scopes += [f"{n}라운드" for n in range(1,7) if f"{n}라운드" in rounds]
+    scopes += [x for x in POSTSEASON if x in comps]
     selected_scope = st.selectbox("분석 범위", scopes)
 
-    selected_game_key = None
-    if selected_scope == "개별 경기":
-        game_rows = (
-            player_df[["경기일", "대회구분", "경기번호", "팀", "상대팀"]]
-            .drop_duplicates()
-            .sort_values(["경기일", "경기번호"], ascending=[False, False])
-        )
-        labels = {}
-        for _, row in game_rows.iterrows():
-            date = str(row["경기일"])[:10]
-            label = f"{date} | {row['팀']} vs {row['상대팀']}"
-            if str(row["대회구분"]) != "정규리그":
-                label += f" | {row['대회구분']}"
-            labels[label] = (date, str(row["대회구분"]), str(row["경기번호"]))
-        if labels:
-            game_label = st.selectbox("경기 선택", list(labels))
-            selected_game_key = labels[game_label]
+    with st.expander("상세 필터"):
+        positions = ["전체 포지션"] + sorted(team_df["공격수포지션"].dropna().astype(str).unique())
+        selected_position = st.selectbox("공격수 포지션", positions)
+        detail_df = team_df if selected_position == "전체 포지션" else team_df[team_df["공격수포지션"].astype(str) == selected_position]
+        players = ["전체 선수"] + sorted(detail_df["공격수"].dropna().astype(str).unique())
+        selected_player = st.selectbox("공격수", players)
+        top_n = st.slider("흐름에 표시할 상위 조합", 5, 20, 10, 5)
 
-filtered = apply_scope(player_df, selected_scope, selected_game_key)
+filtered = apply_scope(team_df, selected_scope)
+if selected_position != "전체 포지션":
+    filtered = filtered[filtered["공격수포지션"].astype(str) == selected_position]
+if selected_player != "전체 선수":
+    filtered = filtered[filtered["공격수"].astype(str) == selected_player]
 
 if filtered.empty:
     st.info("선택한 조건에 해당하는 기록된 루트가 없습니다.")
     st.stop()
 
-summary = attack_summary(filtered)
-unique_connectors = filtered["연결선수"].dropna().nunique()
-unique_attackers = filtered["공격수"].dropna().nunique()
+n, rate, eff = summarize(filtered)
+origin_counts = filtered["기점유형"].fillna("기타").astype(str).value_counts()
+top_origin = origin_counts.index[0] if len(origin_counts) else "-"
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("기록된 루트", f"{summary['시도']:,}회")
-m2.metric("공격 성공률", f"{summary['성공률']:.1f}%")
-m3.metric("공격 효율", f"{summary['효율']:.1f}%")
-m4.metric("연결선수", f"{unique_connectors:,}명")
+c1,c2,c3,c4 = st.columns(4)
+c1.metric("기록된 루트", f"{n:,}회")
+c2.metric("공격 성공률", f"{rate:.1f}%")
+c3.metric("공격 효율", f"{eff:.1f}%")
+c4.metric("가장 많은 기점", top_origin)
+st.caption("루트는 실시간 기록에서 기점과 연결선수가 확인된 공격만 포함하며, 실제 랠리의 모든 터치를 의미하지 않습니다.")
 
-st.caption(
-    "루트는 실시간 기록에서 기점과 연결선수가 확인된 공격만 포함합니다. "
-    "실제 랠리의 모든 터치를 의미하지 않습니다."
-)
+st.divider()
+st.subheader("기점 → 연결선수 → 공격수")
+
+if selected_team == "전체 팀":
+    st.info("선수 단위 흐름은 팀을 선택하면 표시됩니다. 전체 팀에서는 아래 기점 유형 비교를 이용해 주세요.")
+else:
+    flow = (
+        filtered.dropna(subset=["기점유형","연결선수","공격수"])
+        .groupby(["기점유형","연결선수","공격수"])
+        .size().reset_index(name="루트수")
+        .sort_values("루트수", ascending=False).head(top_n)
+    )
+    if flow.empty:
+        st.info("표시할 루트 조합이 없습니다.")
+    else:
+        origins = flow["기점유형"].astype(str).unique().tolist()
+        connectors = flow["연결선수"].astype(str).unique().tolist()
+        attackers = flow["공격수"].astype(str).unique().tolist()
+        node_labels = [f"기점 | {x}" for x in origins] + [f"연결 | {x}" for x in connectors] + [f"공격 | {x}" for x in attackers]
+        idx = {v:i for i,v in enumerate(node_labels)}
+
+        left = flow.groupby(["기점유형","연결선수"], as_index=False)["루트수"].sum()
+        source=[]; target=[]; value=[]; hover=[]
+        for _,r in left.iterrows():
+            source.append(idx[f"기점 | {r['기점유형']}"])
+            target.append(idx[f"연결 | {r['연결선수']}"])
+            value.append(int(r["루트수"]))
+            hover.append(f"{r['기점유형']} → {r['연결선수']}: {int(r['루트수']):,}회")
+        right = flow.groupby(["연결선수","공격수"], as_index=False)["루트수"].sum()
+        for _,r in right.iterrows():
+            source.append(idx[f"연결 | {r['연결선수']}"])
+            target.append(idx[f"공격 | {r['공격수']}"])
+            value.append(int(r["루트수"]))
+            hover.append(f"{r['연결선수']} → {r['공격수']}: {int(r['루트수']):,}회")
+
+        fig = go.Figure(go.Sankey(
+            arrangement="snap",
+            node=dict(label=node_labels, pad=22, thickness=18, line=dict(color="rgba(0,0,0,0.35)", width=0.7)),
+            link=dict(source=source, target=target, value=value, customdata=hover, hovertemplate="%{customdata}<extra></extra>"),
+        ))
+        fig.update_layout(height=max(540, 42*len(node_labels)), margin=dict(l=20,r=20,t=20,b=20), font=dict(size=15, color="black"))
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(f"선 굵기는 상위 {top_n}개 기록 조합의 빈도를 나타냅니다.")
 
 st.divider()
 st.subheader("기점 유형별 공격 결과")
-
 origin = (
-    filtered.groupby("기점유형", dropna=False)
-    .agg(
-        공격시도=("공격수", "size"),
-        공격성공=("공격성공", "sum"),
-        공격범실=("공격범실", "sum"),
-        블로킹당함=("블로킹당함", "sum"),
-    )
+    filtered.assign(기점=filtered["기점유형"].fillna("기타").astype(str))
+    .groupby("기점")
+    .agg(공격시도=("공격수","size"), 공격성공=("공격성공","sum"), 공격범실=("공격범실","sum"), 블로킹당함=("블로킹당함","sum"))
     .reset_index()
 )
-origin["공격성공률_%"] = origin["공격성공"] / origin["공격시도"] * 100
-origin["공격효율_%"] = (
-    origin["공격성공"] - origin["공격범실"] - origin["블로킹당함"]
-) / origin["공격시도"] * 100
+origin["공격성공률_%"] = origin["공격성공"]/origin["공격시도"]*100
+origin["공격효율_%"] = (origin["공격성공"]-origin["공격범실"]-origin["블로킹당함"])/origin["공격시도"]*100
 origin = origin.sort_values("공격시도", ascending=False)
 
-fig_origin = px.bar(
-    origin,
-    x="기점유형",
-    y="공격성공률_%",
-    text=[
-        f"{r:.1f}%<br>{int(n):,}회"
-        for r, n in zip(origin["공격성공률_%"], origin["공격시도"])
-    ],
-    custom_data=["공격시도", "공격효율_%"],
-    labels={"기점유형": "", "공격성공률_%": "공격 성공률 (%)"},
-)
-fig_origin.update_traces(
-    textposition="outside",
-    cliponaxis=False,
-    textfont=dict(size=BAR_LABEL_SIZE, color="black"),
-    hovertemplate="%{x}<br>공격 성공률 %{y:.1f}%<br>공격 시도 %{customdata[0]:,}회<br>공격 효율 %{customdata[1]:.1f}%<extra></extra>",
-)
-fig_origin.update_layout(
-    height=500,
-    showlegend=False,
-    font=dict(size=BODY_TEXT_SIZE, color="black"),
-    xaxis=dict(tickfont=dict(size=AXIS_TICK_SIZE, color="black")),
-    yaxis=dict(
-        range=[0, max(origin["공격성공률_%"].max() + 12, 12)],
-        ticksuffix="%",
-        tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-        title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-        gridcolor="rgba(0,0,0,0.12)",
-    ),
-)
-st.plotly_chart(fig_origin, use_container_width=True)
+fig_o = px.bar(origin, x="기점", y="공격성공률_%",
+    text=[f"{r:.1f}%<br>({n:,}회)" for r,n in zip(origin["공격성공률_%"],origin["공격시도"])],
+    custom_data=["공격시도","공격효율_%"],
+    labels={"기점":"","공격성공률_%":"공격 성공률 (%)"})
+fig_o.update_traces(textposition="outside", cliponaxis=False, textfont=dict(size=BAR_LABEL_SIZE,color="black"),
+    hovertemplate="%{x}<br>공격 성공률 %{y:.1f}%<br>기록 %{customdata[0]:,}회<br>공격 효율 %{customdata[1]:.1f}%<extra></extra>")
+fig_o.update_layout(height=500, showlegend=False, margin=dict(t=55,b=40),
+    font=dict(size=BODY_TEXT_SIZE,color="black"),
+    xaxis=dict(tickfont=dict(size=AXIS_TICK_SIZE,color="black")),
+    yaxis=dict(range=[0,max(origin["공격성공률_%"].max()+12,12)],ticksuffix="%",tickfont=dict(size=AXIS_TICK_SIZE,color="black"),title_font=dict(size=AXIS_TITLE_SIZE,color="black"),gridcolor="rgba(0,0,0,0.12)"))
+st.plotly_chart(fig_o,use_container_width=True)
+
+table = origin[["기점","공격시도","공격성공률_%","공격효율_%"]].copy()
+table.columns=["기점","기록 수","공격 성공률 (%)","공격 효율 (%)"]
+table["공격 성공률 (%)"]=table["공격 성공률 (%)"].round(1)
+table["공격 효율 (%)"]=table["공격 효율 (%)"].round(1)
+st.dataframe(table,use_container_width=True,hide_index=True)
 
 st.divider()
-st.subheader("연결선수별 공격 결과")
-
-connector = (
-    filtered.dropna(subset=["연결선수"])
-    .groupby("연결선수")
-    .agg(
-        공격시도=("공격수", "size"),
-        공격성공=("공격성공", "sum"),
-        공격범실=("공격범실", "sum"),
-        블로킹당함=("블로킹당함", "sum"),
-    )
+st.subheader("연결선수 → 공격수 조합 TOP 10")
+pairs = (
+    filtered.dropna(subset=["연결선수","공격수"])
+    .groupby(["연결선수","공격수"])
+    .agg(루트수=("공격수","size"),공격성공=("공격성공","sum"),공격범실=("공격범실","sum"),블로킹당함=("블로킹당함","sum"))
     .reset_index()
 )
-connector["공격성공률_%"] = connector["공격성공"] / connector["공격시도"] * 100
-connector["공격효율_%"] = (
-    connector["공격성공"] - connector["공격범실"] - connector["블로킹당함"]
-) / connector["공격시도"] * 100
-connector = connector.sort_values("공격시도", ascending=False)
+pairs["공격성공률_%"]=pairs["공격성공"]/pairs["루트수"]*100
+pairs["공격효율_%"]=(pairs["공격성공"]-pairs["공격범실"]-pairs["블로킹당함"])/pairs["루트수"]*100
+pairs["조합"]=pairs["연결선수"].astype(str)+" → "+pairs["공격수"].astype(str)
+pairs=pairs.sort_values(["루트수","공격성공률_%"],ascending=[False,False]).head(10).sort_values("루트수")
 
-min_conn = st.number_input(
-    "연결선수 최소 기록 루트",
-    min_value=1,
-    max_value=max(int(connector["공격시도"].max()), 1),
-    value=min(30, max(int(connector["공격시도"].max()), 1)),
-    step=1,
-)
-connector_view = connector[connector["공격시도"] >= min_conn].copy()
-
-if connector_view.empty:
-    st.info("최소 기록 루트 기준을 충족하는 연결선수가 없습니다.")
-else:
-    fig_connector = px.scatter(
-        connector_view,
-        x="공격시도",
-        y="공격성공률_%",
-        size="공격시도",
-        hover_name="연결선수",
-        custom_data=["공격효율_%"],
-        labels={
-            "공격시도": "기록된 루트 수",
-            "공격성공률_%": "이후 공격 성공률 (%)",
-        },
-    )
-    fig_connector.update_traces(
-        marker=dict(line=dict(width=1, color="black")),
-        hovertemplate="<b>%{hovertext}</b><br>루트 %{x:,}회<br>이후 공격 성공률 %{y:.1f}%<br>이후 공격 효율 %{customdata[0]:.1f}%<extra></extra>",
-    )
-    fig_connector.update_layout(
-        height=560,
-        font=dict(size=BODY_TEXT_SIZE, color="black"),
-        xaxis=dict(
-            tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-            title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-            gridcolor="rgba(0,0,0,0.12)",
-        ),
-        yaxis=dict(
-            ticksuffix="%",
-            tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-            title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
-            gridcolor="rgba(0,0,0,0.12)",
-        ),
-        showlegend=False,
-    )
-    st.plotly_chart(fig_connector, use_container_width=True)
-    st.caption("연결선수별 수치는 해당 연결 뒤에 기록된 공격의 결과이며, 연결선수 개인의 기술 평가를 뜻하지 않습니다.")
+fig_p=px.bar(pairs,x="루트수",y="조합",orientation="h",
+    text=[f"{n:,}회 | {r:.1f}%" for n,r in zip(pairs["루트수"],pairs["공격성공률_%"])],
+    custom_data=["공격성공률_%","공격효율_%"],
+    labels={"루트수":"기록 수","조합":""})
+fig_p.update_traces(textposition="outside",cliponaxis=False,textfont=dict(size=14,color="black"),
+    hovertemplate="%{y}<br>기록 %{x:,}회<br>공격 성공률 %{customdata[0]:.1f}%<br>공격 효율 %{customdata[1]:.1f}%<extra></extra>")
+fig_p.update_layout(height=600,showlegend=False,margin=dict(l=20,r=130,t=30,b=40),
+    font=dict(size=BODY_TEXT_SIZE,color="black"),
+    xaxis=dict(tickfont=dict(size=AXIS_TICK_SIZE,color="black"),title_font=dict(size=AXIS_TITLE_SIZE,color="black"),gridcolor="rgba(0,0,0,0.12)"),
+    yaxis=dict(tickfont=dict(size=15,color="black")))
+st.plotly_chart(fig_p,use_container_width=True)
+st.caption("막대는 조합이 기록된 횟수이며, 막대 끝의 %는 해당 조합 뒤 공격 성공률입니다.")
 
 st.divider()
-st.subheader("자주 나온 루트")
-
-route_table = (
-    filtered.dropna(subset=["연결선수", "공격수"])
-    .groupby(["기점유형", "연결선수", "공격수"], dropna=False)
-    .agg(
-        루트수=("공격수", "size"),
-        공격성공=("공격성공", "sum"),
-        공격범실=("공격범실", "sum"),
-        블로킹당함=("블로킹당함", "sum"),
-    )
-    .reset_index()
-)
-route_table["공격성공률_%"] = route_table["공격성공"] / route_table["루트수"] * 100
-route_table["공격효율_%"] = (
-    route_table["공격성공"] - route_table["공격범실"] - route_table["블로킹당함"]
-) / route_table["루트수"] * 100
-route_table = route_table.sort_values(["루트수", "공격성공률_%"], ascending=[False, False]).head(20)
-route_table.insert(0, "순위", range(1, len(route_table) + 1))
-route_table = route_table.rename(columns={
-    "기점유형": "기점",
-    "루트수": "기록 수",
-    "공격성공률_%": "공격 성공률 (%)",
-    "공격효율_%": "공격 효율 (%)",
-})
-route_table["공격 성공률 (%)"] = route_table["공격 성공률 (%)"].round(1)
-route_table["공격 효율 (%)"] = route_table["공격 효율 (%)"].round(1)
-st.dataframe(
-    route_table[["순위", "기점", "연결선수", "공격수", "기록 수", "공격 성공률 (%)", "공격 효율 (%)"]],
-    use_container_width=True,
-    hide_index=True,
-    height=52 + 35 * len(route_table),
-)
-
-st.divider()
-st.subheader("특수 연결 상황")
-
-special_rows = []
+st.subheader("특수 루트")
+special=[]
+self_df=filtered[filtered["기점선수"].notna() & (filtered["기점선수"].astype(str)==filtered["공격수"].astype(str))]
+sn,sr,se=summarize(self_df)
+special.append({"상황":"기점선수 = 공격수","기록 수":sn,"공격 성공률 (%)":round(sr,1),"공격 효율 (%)":round(se,1)})
 if "연결선수포지션" in filtered.columns:
-    non_setter = filtered[
-        filtered["연결선수포지션"].notna()
-        & (filtered["연결선수포지션"].astype(str) != "S")
-    ]
-    s = attack_summary(non_setter)
-    special_rows.append({"상황": "비세터 연결", "루트 수": s["시도"], "공격 성공률 (%)": s["성공률"], "공격 효율 (%)": s["효율"]})
-
-self_route = filtered[
-    filtered["기점선수"].notna()
-    & (filtered["기점선수"].astype(str) == filtered["공격수"].astype(str))
-]
-s = attack_summary(self_route)
-special_rows.append({"상황": "기점선수 = 공격수", "루트 수": s["시도"], "공격 성공률 (%)": s["성공률"], "공격 효율 (%)": s["효율"]})
-
-special = pd.DataFrame(special_rows)
-if not special.empty:
-    special["공격 성공률 (%)"] = special["공격 성공률 (%)"].round(1)
-    special["공격 효율 (%)"] = special["공격 효율 (%)"].round(1)
-    st.dataframe(special, use_container_width=True, hide_index=True)
-
-st.caption(
-    "※ 이 페이지의 '루트'는 기록된 source → 연결선수 → 공격수 조합입니다. "
-    "물리적으로 정확히 3번의 터치가 있었다는 뜻으로 해석하지 않습니다."
-)
+    ns=filtered[filtered["연결선수포지션"].notna() & (filtered["연결선수포지션"].astype(str)!="S")]
+    nn,nr,ne=summarize(ns)
+    special.insert(0,{"상황":"비세터 연결","기록 수":nn,"공격 성공률 (%)":round(nr,1),"공격 효율 (%)":round(ne,1)})
+st.dataframe(pd.DataFrame(special),use_container_width=True,hide_index=True)
+st.caption("※ 모든 루트 수치는 기록된 기점 → 연결선수 → 공격수 조합을 기준으로 합니다.")
