@@ -1261,8 +1261,8 @@ if (
                 yaxis=dict(
                     range=[0, max_compare_rate + 18],
                     ticksuffix="%",
-                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-                    title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+                    tickfont=dict(size=16, color="black"),
+                    title_font=dict(size=18, color="black"),
                     showgrid=True,
                     gridcolor="rgba(0,0,0,0.12)",
                     showline=True,
@@ -1464,8 +1464,8 @@ if (
                 yaxis=dict(
                     range=[0, max_receive_rate + 20],
                     ticksuffix="%",
-                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
-                    title_font=dict(size=AXIS_TITLE_SIZE, color="black"),
+                    tickfont=dict(size=16, color="black"),
+                    title_font=dict(size=18, color="black"),
                     showgrid=True,
                     gridcolor="rgba(0,0,0,0.12)",
                     showline=True,
@@ -2071,14 +2071,8 @@ if (
                     yaxis=dict(
                         range=[0, max_individual_receive + 18],
                         ticksuffix="%",
-                        tickfont=dict(
-                            size=AXIS_TICK_SIZE,
-                            color="black",
-                        ),
-                        title_font=dict(
-                            size=AXIS_TITLE_SIZE,
-                            color="black",
-                        ),
+                        tickfont=dict(size=16, color="black"),
+                        title_font=dict(size=18, color="black"),
                         showgrid=True,
                         gridcolor="rgba(0,0,0,0.12)",
                         showline=True,
