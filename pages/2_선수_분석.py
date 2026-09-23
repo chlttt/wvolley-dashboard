@@ -1252,7 +1252,7 @@ if (
                 uniformtext_mode="show",
                 font=dict(size=BODY_TEXT_SIZE, color="black"),
                 xaxis=dict(
-                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                    tickfont=dict(size=16, color="black"),
                     showline=True,
                     linecolor="black",
                 ),
@@ -1455,7 +1455,7 @@ if (
                 bargroupgap=0.10,
                 font=dict(size=BODY_TEXT_SIZE, color="black"),
                 xaxis=dict(
-                    tickfont=dict(size=AXIS_TICK_SIZE, color="black"),
+                    tickfont=dict(size=16, color="black"),
                     showline=True,
                     linecolor="black",
                 ),
@@ -2062,10 +2062,7 @@ if (
                         color="black",
                     ),
                     xaxis=dict(
-                        tickfont=dict(
-                            size=AXIS_TICK_SIZE,
-                            color="black",
-                        ),
+                        tickfont=dict(size=16, color="black"),
                         showline=True,
                         linecolor="black",
                     ),
