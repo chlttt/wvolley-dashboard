@@ -189,9 +189,9 @@ if "시즌코드" in filtered_schedule.columns:
         attack_base["시즌코드"].astype(str)
         == str(filtered_schedule["시즌코드"].astype(str).iloc[0])
     ]
-if selected_team != "전체 팀":
-    attack_base = attack_base[attack_base["팀"].astype(str) == selected_team]
-
+# 팀 선택은 schedule의 표시명으로 routes를 다시 필터링하지 않는다.
+# 두 파일의 팀 표시명이 서로 다를 수 있으므로(예: 구단 풀네임 vs 축약명),
+# 이미 선택된 env_match의 팀코드 + 경기번호를 merge key로 사용해 팀을 제한한다.
 analysis = attack_base.merge(env_match, on=join_keys, how="inner", suffixes=("", "_환경"))
 
 st.divider()
@@ -241,10 +241,11 @@ if home_col and home_col in analysis.columns:
     for value, part in analysis.dropna(subset=[home_col]).groupby(home_col):
         n, rate, eff = attack_metrics(part)
         home_summary_rows.append({"구분": str(value), "공격시도": n, "공격성공률_%": rate, "공격효율_%": eff})
-    home_summary = pd.DataFrame(home_summary_rows).sort_values("구분")
+    home_summary = pd.DataFrame(home_summary_rows)
     if home_summary.empty:
         st.info("홈·원정 구분 기록이 없습니다.")
     else:
+        home_summary = home_summary.sort_values("구분")
         fig_home = px.bar(
             home_summary, x="구분", y="공격성공률_%",
             text=[f"{r:.1f}%<br>{n:,}회" for r, n in zip(home_summary["공격성공률_%"], home_summary["공격시도"])],
