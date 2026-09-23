@@ -460,14 +460,15 @@ def load_data():
     routes = pd.read_parquet("season_routes_2526.parquet")
     team_set = pd.read_parquet("team_set_summary.parquet")
     receives = pd.read_parquet("receive_events_2526_final.parquet")
+    serves = pd.read_parquet("serve_events_2526.parquet")
 
     for col in ["공격성공", "공격범실", "블로킹당함"]:
         if col in routes.columns:
             routes[col] = routes[col].fillna(False).astype(bool)
 
-    return routes, team_set, receives
+    return routes, team_set, receives, serves
 
-routes, team_set, receives = load_data()
+routes, team_set, receives, serves = load_data()
 
 st.title("🏐 팀 분석")
 st.caption("2025-26 V-League 여자부 팀별 공격 지표")
@@ -612,6 +613,7 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
             "리시브 효율",
             "정확 리시브율",
             "리시브 실패율",
+            "서브 득점",
         ],
         key="team_phase_metric",
     )
@@ -663,7 +665,7 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
                 - phase_summary["블로킹당함"]
             ) / phase_summary["시도"] * 100
         sample_label = "공격 시도"
-    else:
+    elif trend_metric in ["리시브 효율", "정확 리시브율", "리시브 실패율"]:
         # 리시브 이벤트에는 라운드/대회명이 없을 수 있으므로 공격 데이터의
         # 경기 메타데이터를 경기번호+팀코드로 붙여 동일한 구간 기준을 사용한다.
         meta_cols = ["경기번호", "팀코드", "대회구분", "경기구분"]
@@ -713,6 +715,28 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
             phase_summary["지표값"] = phase_summary["실패"] / phase_summary["시도"] * 100
         sample_label = "리시브 시도"
 
+    else:
+        # 서브 데이터는 여자부 132경기만 검증해 수집한 realtime VV 이벤트다.
+        serve_team = serves.copy()
+        if "시즌코드" in serve_team.columns:
+            serve_team = serve_team[
+                serve_team["시즌코드"].astype(str) == str(selected_season_code)
+            ]
+        serve_team = serve_team[
+            serve_team["팀"].astype(str) == str(selected_team)
+        ]
+        phase_source = add_phase_column(serve_team)
+        phase_summary = (
+            phase_source.groupby("구간")
+            .agg(
+                시도=("서브득점", "size"),
+                득점=("서브득점", "sum"),
+            )
+            .reset_index()
+        )
+        phase_summary["지표값"] = phase_summary["득점"].astype(float)
+        sample_label = "서브 시도"
+
     if phase_summary.empty:
         st.info("선택한 조건에서 해당 지표 기록이 없습니다.")
     else:
@@ -724,27 +748,43 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
         )
         phase_summary = phase_summary.sort_values("구간")
 
+        is_count_metric = trend_metric == "서브 득점"
+        y_axis_label = trend_metric if is_count_metric else f"{trend_metric} (%)"
+        point_text = (
+            [
+                f"{int(value):,}점<br>({attempt:,}회)"
+                for value, attempt in zip(phase_summary["지표값"], phase_summary["시도"])
+            ]
+            if is_count_metric
+            else [
+                f"{value:.1f}%<br>({attempt:,}회)"
+                for value, attempt in zip(phase_summary["지표값"], phase_summary["시도"])
+            ]
+        )
+        hover_value = (
+            trend_metric + " %{y:,.0f}점<br>"
+            if is_count_metric
+            else trend_metric + " %{y:.1f}%<br>"
+        )
+
         fig_phase = px.line(
             phase_summary,
             x="구간",
             y="지표값",
             markers=True,
             custom_data=["시도"],
-            labels={"구간": "", "지표값": f"{trend_metric} (%)"},
+            labels={"구간": "", "지표값": y_axis_label},
         )
         fig_phase.update_traces(
             line=dict(color=selected_team_color, width=4),
             marker=dict(color=selected_team_color, size=11),
-            text=[
-                f"{value:.1f}%<br>({attempt:,}회)"
-                for value, attempt in zip(phase_summary["지표값"], phase_summary["시도"])
-            ],
+            text=point_text,
             textposition="top center",
             mode="lines+markers+text",
             textfont=dict(size=16, color="black"),
             hovertemplate=(
                 "%{x}<br>"
-                + trend_metric + " %{y:.1f}%<br>"
+                + hover_value
                 + sample_label + " %{customdata[0]:,}회"
                 + "<extra></extra>"
             ),
@@ -762,11 +802,18 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
                 linecolor="black",
             ),
             yaxis=dict(
-                range=[
-                    max(0, phase_summary["지표값"].min() - 8),
-                    min(100, phase_summary["지표값"].max() + 8),
-                ],
-                ticksuffix="%",
+                range=(
+                    [
+                        0,
+                        max(1, phase_summary["지표값"].max() * 1.22),
+                    ]
+                    if is_count_metric
+                    else [
+                        max(0, phase_summary["지표값"].min() - 8),
+                        min(100, phase_summary["지표값"].max() + 8),
+                    ]
+                ),
+                ticksuffix="" if is_count_metric else "%",
                 tickfont=dict(size=16, color="black"),
                 title_font=dict(size=20, color="black"),
                 gridcolor="rgba(0,0,0,0.12)",
@@ -780,6 +827,8 @@ if selected_scope in ["전체", "정규리그", "포스트시즌"]:
             st.caption("포스트시즌은 해당 팀이 실제 참가한 단계만 표시합니다.")
         if trend_metric == "리시브 효율":
             st.caption("리시브 효율 = (정확 리시브 - 리시브 실패) / 리시브 시도 × 100")
+        if trend_metric == "서브 득점":
+            st.caption("서브 득점은 KOVO 실시간 기록의 서브(VV) 이벤트 중 성공(suc)으로 기록된 횟수입니다.")
 
 st.divider()
 
